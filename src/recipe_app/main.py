@@ -15,7 +15,7 @@ from recipe_app.db import (
     update_recipe, delete_recipe, search_recipes, list_categories,
 )
 from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
-from recipe_app.routers import recipes, categories, search
+from recipe_app.routers import recipes, categories, search, meal_plans, pantry
 
 
 # Allowed HTML tags for sanitization (same as scraper)
@@ -62,6 +62,8 @@ app.add_middleware(CSPMiddleware)
 app.include_router(recipes.router)
 app.include_router(categories.router)
 app.include_router(search.router)
+app.include_router(meal_plans.router)
+app.include_router(pantry.router)
 
 # Static files and templates
 _static_dir = Path(__file__).parent.parent.parent / "static"
