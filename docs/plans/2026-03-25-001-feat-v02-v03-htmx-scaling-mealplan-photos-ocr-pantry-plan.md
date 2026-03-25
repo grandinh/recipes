@@ -263,44 +263,27 @@ async def run_migrations(db: aiosqlite.Connection, db_path: str):
 
 ```mermaid
 erDiagram
-    recipes ||--o{ parsed_ingredients : "has parsed"
     recipes ||--o{ meal_plan_entries : "appears in"
     recipes ||--o{ recipe_categories : "tagged with"
-    recipes ||--o{ grocery_list_items : "sourced from"
 
     meal_plans ||--o{ meal_plan_entries : "contains"
     meal_plans ||--o| grocery_lists : "generates"
 
     grocery_lists ||--o{ grocery_list_items : "contains"
 
-    pantry_items }o--o{ parsed_ingredients : "matches against"
-
     recipes {
         int id PK
         text title
-        text ingredients
-        int base_servings "NEW v0.2"
-        text photo_path "NEW v0.2"
-        text image_url
-        int servings
-    }
-
-    parsed_ingredients {
-        int id PK
-        int recipe_id FK
-        text original_text
-        text name
-        real quantity
-        text unit
-        text preparation
-        real confidence
+        text ingredients "JSON array"
+        text servings "display text"
+        int base_servings "NEW v0.2 - for scaling"
+        text photo_path "NEW v0.2 - local photo"
+        text image_url "external URL"
     }
 
     meal_plans {
         int id PK
         text name
-        text start_date
-        text end_date
     }
 
     meal_plan_entries {
