@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}Recipes — Recipe Manager{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1>Recipes</h1>
+
+  {# Import from URL quick input #}
+  <form class="import-bar" method="post" action="/api/recipes/import" id="importForm">
+    <input type="url" name="url" placeholder="Import from URL..." required class="input import-input">
+    <button type="submit" class="btn btn-secondary">Import</button>
+  </form>
+</section>
+
+{# Search and filter row #}
+<section class="search-filter-row">
+  <form method="get" action="/" class="search-form">
+    <input type="search" name="q" value="{{ q or '' }}" placeholder="Search recipes..." class="input search-input">
+    <select name="category" class="input select-input">
+      <option value="">All Categories</option>
+      {% for cat in categories %}
+        <option value="{{ cat.name }}" {% if category == cat.name %}selected{% endif %}>
+          {{ cat.name }} ({{ cat.recipe_count }})
+        </option>
+      {% endfor %}
+    </select>
+    <select name="sort" class="input select-input">
+      <option value="recent" {% if sort == 'recent' %}selected{% endif %}>Newest</option>
+      <option value="name" {% if sort == 'name' %}selected{% endif %}>Name</option>
+      <option value="rating" {% if sort == 'rating' %}selected{% endif %}>Rating</option>
+    </select>
+    <button type="submit" class="btn btn-primary">Search</button>
+  </form>
+</section>
+
+{# Recipe list #}
+{% if recipes %}
+  <section class="recipe-grid">
+    {% for recipe in recipes %}
+      <a href="/recipe/{{ recipe.id }}" class="recipe-card">
+        {% if recipe.image_url and recipe.image_url.startswith('https') %}
+          <div class="card-image">
+            <img src="{{ recipe.image_url }}" alt="{{ recipe.title }}" loading="lazy">
+          </div>
+        {% else %}
+          <div class="card-image card-image-placeholder"></div>
+        {% endif %}
+        <div class="card-body">
+          <h2 class="card-title">{{ recipe.title }}</h2>
+          {% if recipe.description %}
+            <p class="card-desc">{{ recipe.description[:120] }}{% if recipe.description|length > 120 %}...{% endif %}</p>
+          {% endif %}
+          <div class="card-meta">
+            {% if recipe.rating %}
+              <span class="card-rating">
+                {% for i in range(recipe.rating) %}&#9733;{% endfor %}{% for i in range(5 - recipe.rating) %}&#9734;{% endfor %}
+              </span>
+            {% endif %}
+            {% if recipe.cuisine %}
+              <span class="card-cuisine">{{ recipe.cuisine }}</span>
+            {% endif %}
+            {% if recipe.prep_time_minutes %}
+              <span class="card-time">{{ recipe.prep_time_minutes }} min prep</span>
+            {% endif %}
+          </div>
+          {% if recipe.categories %}
+            <div class="card-tags">
+              {% for cat in recipe.categories %}
+                <span class="tag">{{ cat }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      </a>
+    {% endfor %}
+  </section>
+
+  {# Pagination #}
+  <nav class="pagination">
+    {% if page > 1 %}
+      <a href="/?q={{ q or '' }}&category={{ category or '' }}&sort={{ sort or 'recent' }}&page={{ page - 1 }}"
+         class="btn btn-secondary">Previous</a>
+    {% endif %}
+    {% if has_next %}
+      <a href="/?q={{ q or '' }}&category={{ category or '' }}&sort={{ sort or 'recent' }}&page={{ page + 1 }}"
+         class="btn btn-secondary">Next</a>
+    {% endif %}
+  </nav>
+{% else %}
+  <section class="empty-state">
+    <h2>No recipes found</h2>
+    <p>Try a different search, or <a href="/add">add a new recipe</a>.</p>
+  </section>
+{% endif %}
+
+{# Minimal JS for the import form: POST JSON, then redirect to edit page #}
+<script>
+document.getElementById('importForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var url = this.querySelector('[name=url]').value;
+  var btn = this.querySelector('button');
+  btn.textContent = 'Importing...';
+  btn.disabled = true;
+  fetch('/api/recipes/import', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: url})
+  })
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || 'Import failed'); });
+    return r.json();
+  })
+  .then(function(data) { window.location.href = '/edit/' + data.recipe.id; })
+  .catch(function(err) { alert(err.message); btn.textContent = 'Import'; btn.disabled = false; });
+});
+</script>
+{% endblock %}

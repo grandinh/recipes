@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}{{ recipe.title }} — Recipe Manager{% endblock %}
+
+{% block content %}
+<article class="recipe-detail">
+  <header class="detail-header">
+    <div class="detail-title-row">
+      <h1>{{ recipe.title }}</h1>
+      <span class="favorite-indicator" title="{% if recipe.is_favorite %}Favorite{% else %}Not a favorite{% endif %}">
+        {% if recipe.is_favorite %}&#9829;{% else %}&#9825;{% endif %}
+      </span>
+    </div>
+    <div class="detail-actions">
+      <a href="/edit/{{ recipe.id }}" class="btn btn-primary">Edit</a>
+      <form method="post" action="/delete/{{ recipe.id }}" class="inline-form"
+            onsubmit="return confirm('Delete this recipe? This cannot be undone.');">
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </form>
+    </div>
+  </header>
+
+  {% if recipe.image_url %}
+    <div class="detail-image">
+      <img src="{{ recipe.image_url }}" alt="{{ recipe.title }}">
+    </div>
+  {% endif %}
+
+  {% if recipe.description %}
+    <p class="detail-description">{{ recipe.description }}</p>
+  {% endif %}
+
+  {# Metadata row #}
+  <div class="detail-meta">
+    {% if recipe.prep_time_minutes %}
+      <div class="meta-item">
+        <span class="meta-label">Prep</span>
+        <span class="meta-value">{{ recipe.prep_time_minutes }} min</span>
+      </div>
+    {% endif %}
+    {% if recipe.cook_time_minutes %}
+      <div class="meta-item">
+        <span class="meta-label">Cook</span>
+        <span class="meta-value">{{ recipe.cook_time_minutes }} min</span>
+      </div>
+    {% endif %}
+    {% if recipe.total_time_minutes %}
+      <div class="meta-item">
+        <span class="meta-label">Total</span>
+        <span class="meta-value">{{ recipe.total_time_minutes }} min</span>
+      </div>
+    {% endif %}
+    {% if recipe.servings %}
+      <div class="meta-item">
+        <span class="meta-label">Servings</span>
+        <span class="meta-value">{{ recipe.servings }}</span>
+      </div>
+    {% endif %}
+    {% if recipe.difficulty %}
+      <div class="meta-item">
+        <span class="meta-label">Difficulty</span>
+        <span class="meta-value">{{ recipe.difficulty|capitalize }}</span>
+      </div>
+    {% endif %}
+    {% if recipe.cuisine %}
+      <div class="meta-item">
+        <span class="meta-label">Cuisine</span>
+        <span class="meta-value">{{ recipe.cuisine }}</span>
+      </div>
+    {% endif %}
+    {% if recipe.rating %}
+      <div class="meta-item">
+        <span class="meta-label">Rating</span>
+        <span class="meta-value rating-stars">
+          {% for i in range(recipe.rating) %}&#9733;{% endfor %}{% for i in range(5 - recipe.rating) %}&#9734;{% endfor %}
+        </span>
+      </div>
+    {% endif %}
+  </div>
+
+  {# Ingredients #}
+  {% if recipe.ingredients %}
+    <section class="detail-section">
+      <h2>Ingredients</h2>
+      <ul class="ingredient-list">
+        {% for item in recipe.ingredients %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
+  {# Directions #}
+  {% if recipe.directions %}
+    <section class="detail-section">
+      <h2>Directions</h2>
+      <div class="directions">
+        {% for paragraph in recipe.directions.split('\n') %}
+          {% if paragraph.strip() %}
+            <p>{{ paragraph }}</p>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {# Notes #}
+  {% if recipe.notes %}
+    <section class="detail-section">
+      <h2>Notes</h2>
+      <div class="recipe-notes">
+        {% for paragraph in recipe.notes.split('\n') %}
+          {% if paragraph.strip() %}
+            <p>{{ paragraph }}</p>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {# Nutritional info #}
+  {% if recipe.nutritional_info %}
+    <section class="detail-section">
+      <h2>Nutrition</h2>
+      <dl class="nutrition-list">
+        {% for key, value in recipe.nutritional_info.items() %}
+          <div class="nutrition-item">
+            <dt>{{ key }}</dt>
+            <dd>{{ value }}</dd>
+          </div>
+        {% endfor %}
+      </dl>
+    </section>
+  {% endif %}
+
+  {# Categories #}
+  {% if recipe.categories %}
+    <div class="detail-tags">
+      {% for cat in recipe.categories %}
+        <a href="/?category={{ cat }}" class="tag">{{ cat }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {# Source URL #}
+  {% if recipe.source_url %}
+    <p class="detail-source">
+      Source: <a href="{{ recipe.source_url }}" target="_blank" rel="noopener noreferrer">{{ recipe.source_url }}</a>
+    </p>
+  {% endif %}
+</article>
+{% endblock %}

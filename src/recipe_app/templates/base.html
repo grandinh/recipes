@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Recipe Manager{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container nav-inner">
+      <a href="/" class="nav-brand">Recipe Manager</a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/add">Add Recipe</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      {% if recipe_count is defined and recipe_count is not none %}
+        <p>{{ recipe_count }} recipe{{ "s" if recipe_count != 1 else "" }} in your collection</p>
+      {% endif %}
+      <p class="footer-subtle">Recipe Manager</p>
+    </div>
+  </footer>
+</body>
+</html>

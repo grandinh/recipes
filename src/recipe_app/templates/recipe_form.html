@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block title %}{% if recipe %}Edit {{ recipe.title }}{% else %}Add Recipe{% endif %} — Recipe Manager{% endblock %}
+
+{% block content %}
+<section class="form-page">
+  <h1>{% if recipe %}Edit Recipe{% else %}Add Recipe{% endif %}</h1>
+
+  {# URL import section — only on Add page #}
+  {% if not recipe %}
+    <div class="import-section">
+      <h2>Import from URL</h2>
+      <form class="import-bar" id="importForm">
+        <input type="url" name="url" placeholder="Paste a recipe URL to auto-fill..." required class="input import-input">
+        <button type="submit" class="btn btn-secondary">Import</button>
+      </form>
+      <hr>
+    </div>
+  {% endif %}
+
+  <form method="post"
+        action="{% if recipe %}/edit/{{ recipe.id }}{% else %}/add{% endif %}"
+        class="recipe-form">
+
+    <div class="form-group">
+      <label for="title">Title <span class="required">*</span></label>
+      <input type="text" id="title" name="title" required class="input"
+             value="{{ recipe.title if recipe else '' }}">
+    </div>
+
+    <div class="form-group">
+      <label for="description">Description</label>
+      <textarea id="description" name="description" rows="3" class="input">{{ recipe.description if recipe and recipe.description else '' }}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="ingredients">Ingredients <span class="hint">(one per line)</span></label>
+      <textarea id="ingredients" name="ingredients" rows="8" class="input">{% if recipe and recipe.ingredients %}{% for item in recipe.ingredients %}{{ item }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="directions">Directions</label>
+      <textarea id="directions" name="directions" rows="8" class="input">{{ recipe.directions if recipe and recipe.directions else '' }}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="notes">Notes</label>
+      <textarea id="notes" name="notes" rows="3" class="input">{{ recipe.notes if recipe and recipe.notes else '' }}</textarea>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="source_url">Source URL</label>
+        <input type="url" id="source_url" name="source_url" class="input"
+               value="{{ recipe.source_url if recipe and recipe.source_url else '' }}">
+      </div>
+      <div class="form-group">
+        <label for="image_url">Image URL</label>
+        <input type="url" id="image_url" name="image_url" class="input"
+               value="{{ recipe.image_url if recipe and recipe.image_url else '' }}">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="prep_time_minutes">Prep Time (min)</label>
+        <input type="number" id="prep_time_minutes" name="prep_time_minutes" min="0" class="input"
+               value="{{ recipe.prep_time_minutes if recipe and recipe.prep_time_minutes else '' }}">
+      </div>
+      <div class="form-group">
+        <label for="cook_time_minutes">Cook Time (min)</label>
+        <input type="number" id="cook_time_minutes" name="cook_time_minutes" min="0" class="input"
+               value="{{ recipe.cook_time_minutes if recipe and recipe.cook_time_minutes else '' }}">
+      </div>
+      <div class="form-group">
+        <label for="servings">Servings</label>
+        <input type="text" id="servings" name="servings" class="input"
+               value="{{ recipe.servings if recipe and recipe.servings else '' }}">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="rating">Rating</label>
+        <select id="rating" name="rating" class="input">
+          <option value="">—</option>
+          {% for i in range(1, 6) %}
+            <option value="{{ i }}" {% if recipe and recipe.rating == i %}selected{% endif %}>
+              {{ i }} — {% for s in range(i) %}&#9733;{% endfor %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="difficulty">Difficulty</label>
+        <select id="difficulty" name="difficulty" class="input">
+          <option value="">—</option>
+          {% for level in ['easy', 'medium', 'hard'] %}
+            <option value="{{ level }}" {% if recipe and recipe.difficulty == level %}selected{% endif %}>
+              {{ level|capitalize }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="cuisine">Cuisine</label>
+        <input type="text" id="cuisine" name="cuisine" class="input"
+               value="{{ recipe.cuisine if recipe and recipe.cuisine else '' }}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="categories">Categories <span class="hint">(comma-separated)</span></label>
+      <input type="text" id="categories" name="categories" class="input"
+             value="{% if recipe and recipe.categories %}{{ recipe.categories|join(', ') }}{% endif %}">
+    </div>
+
+    <fieldset class="form-group">
+      <legend>Nutritional Info <span class="hint">(optional)</span></legend>
+      <div class="nutrition-fields" id="nutritionFields">
+        {% if recipe and recipe.nutritional_info %}
+          {% for key, value in recipe.nutritional_info.items() %}
+            <div class="form-row nutrition-row">
+              <input type="text" name="nutrition_key" class="input" value="{{ key }}" placeholder="e.g. Calories">
+              <input type="text" name="nutrition_value" class="input" value="{{ value }}" placeholder="e.g. 350 kcal">
+            </div>
+          {% endfor %}
+        {% endif %}
+        <div class="form-row nutrition-row">
+          <input type="text" name="nutrition_key" class="input" placeholder="e.g. Calories">
+          <input type="text" name="nutrition_value" class="input" placeholder="e.g. 350 kcal">
+        </div>
+      </div>
+      <button type="button" class="btn btn-small" onclick="addNutritionRow()">+ Add Row</button>
+    </fieldset>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary btn-large">Save Recipe</button>
+      <a href="{% if recipe %}/recipe/{{ recipe.id }}{% else %}/{% endif %}" class="btn btn-secondary btn-large">Cancel</a>
+    </div>
+  </form>
+</section>
+
+<script>
+function addNutritionRow() {
+  var container = document.getElementById('nutritionFields');
+  var row = document.createElement('div');
+  row.className = 'form-row nutrition-row';
+  row.innerHTML = '<input type="text" name="nutrition_key" class="input" placeholder="e.g. Calories">'
+    + '<input type="text" name="nutrition_value" class="input" placeholder="e.g. 350 kcal">';
+  container.appendChild(row);
+}
+
+{% if not recipe %}
+document.getElementById('importForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var url = this.querySelector('[name=url]').value;
+  var btn = this.querySelector('button');
+  btn.textContent = 'Importing...';
+  btn.disabled = true;
+  fetch('/api/recipes/import', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: url})
+  })
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || 'Import failed'); });
+    return r.json();
+  })
+  .then(function(data) { window.location.href = '/edit/' + data.recipe.id; })
+  .catch(function(err) { alert(err.message); btn.textContent = 'Import'; btn.disabled = false; });
+});
+{% endif %}
+</script>
+{% endblock %}
