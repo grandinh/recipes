@@ -400,7 +400,6 @@ async def find_recipes_from_pantry(max_missing: int = 2) -> list[dict]:
     max_missing: maximum number of missing ingredients allowed (default 2).
     Each result includes matched and missing ingredient lists.
     """
-    import asyncio
     from recipe_app.pantry_matcher import find_matching_recipes as _find
 
     db = await get_db()
@@ -408,9 +407,7 @@ async def find_recipes_from_pantry(max_missing: int = 2) -> list[dict]:
     if not pantry:
         return []
 
-    # Fetch all recipes
-    all_recipes = await db_module.list_recipes(db, limit=10000, offset=0)
-    return await asyncio.to_thread(_find, all_recipes, pantry, max_missing)
+    return await _find(db, pantry, max_missing)
 
 
 def main():
