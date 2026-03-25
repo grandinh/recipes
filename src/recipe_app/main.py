@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Annotated
 
 import bleach
-from fastapi import FastAPI, Form, Header, Request
+from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2_fragments.fastapi import Jinja2Blocks

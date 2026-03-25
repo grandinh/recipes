@@ -97,7 +97,7 @@ async def generate_grocery_list_endpoint(
         )
     return await db_module.generate_grocery_list(
         db,
-        plan_id=data.meal_plan_id,
+        meal_plan_id=data.meal_plan_id,
         recipe_ids=data.recipe_ids,
         name=data.name,
     )

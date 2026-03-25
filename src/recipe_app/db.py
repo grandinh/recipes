@@ -337,31 +337,32 @@ async def create_recipe(db: aiosqlite.Connection, data: RecipeCreate) -> dict:
     placeholders = ", ".join("?" for _ in fields)
     values = list(fields.values())
 
-    try:
-        await db.execute("BEGIN IMMEDIATE")
+    async with _write_lock:
+        try:
+            await db.execute("BEGIN IMMEDIATE")
 
-        cursor = await db.execute(
-            f"INSERT INTO recipes ({columns}) VALUES ({placeholders})",
-            values,
-        )
-        recipe_id = cursor.lastrowid
+            cursor = await db.execute(
+                f"INSERT INTO recipes ({columns}) VALUES ({placeholders})",
+                values,
+            )
+            recipe_id = cursor.lastrowid
 
-        # Re-fetch the full row (includes generated total_time_minutes, defaults)
-        cursor = await db.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,))
-        row = await cursor.fetchone()
+            # Re-fetch the full row (includes generated total_time_minutes, defaults)
+            cursor = await db.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,))
+            row = await cursor.fetchone()
 
-        # FTS5
-        await _fts_insert(db, recipe_id, row)
+            # FTS5
+            await _fts_insert(db, recipe_id, row)
 
-        # Categories
-        categories = data.categories or []
-        if categories:
-            await _ensure_categories(db, recipe_id, categories)
+            # Categories
+            categories = data.categories or []
+            if categories:
+                await _ensure_categories(db, recipe_id, categories)
 
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
 
     cat_list = await _fetch_categories(db, recipe_id)
     return _recipe_dict(row, categories=cat_list)
@@ -399,33 +400,34 @@ async def update_recipe(
     if "is_favorite" in fields:
         fields["is_favorite"] = int(fields["is_favorite"])
 
-    try:
-        await db.execute("BEGIN IMMEDIATE")
+    async with _write_lock:
+        try:
+            await db.execute("BEGIN IMMEDIATE")
 
-        if fields:
-            set_clause = ", ".join(f"{k} = ?" for k in fields)
-            values = list(fields.values()) + [recipe_id]
-            await db.execute(
-                f"UPDATE recipes SET {set_clause} WHERE id = ?",
-                values,
-            )
+            if fields:
+                set_clause = ", ".join(f"{k} = ?" for k in fields)
+                values = list(fields.values()) + [recipe_id]
+                await db.execute(
+                    f"UPDATE recipes SET {set_clause} WHERE id = ?",
+                    values,
+                )
 
-        # Re-fetch row
-        cursor = await db.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,))
-        row = await cursor.fetchone()
+            # Re-fetch row
+            cursor = await db.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,))
+            row = await cursor.fetchone()
 
-        # FTS5 delete + reinsert
-        await _fts_delete(db, recipe_id)
-        await _fts_insert(db, recipe_id, row)
+            # FTS5 delete + reinsert
+            await _fts_delete(db, recipe_id)
+            await _fts_insert(db, recipe_id, row)
 
-        # Categories
-        if data.categories is not None:
-            await _ensure_categories(db, recipe_id, data.categories)
+            # Categories
+            if data.categories is not None:
+                await _ensure_categories(db, recipe_id, data.categories)
 
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
 
     categories = await _fetch_categories(db, recipe_id)
     return _recipe_dict(row, categories=categories)
@@ -436,14 +438,15 @@ async def delete_recipe(db: aiosqlite.Connection, recipe_id: int) -> bool:
 
     Returns True if a row was deleted.
     """
-    try:
-        await db.execute("BEGIN IMMEDIATE")
-        await _fts_delete(db, recipe_id)
-        cursor = await db.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
+    async with _write_lock:
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            await _fts_delete(db, recipe_id)
+            cursor = await db.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
 
     return cursor.rowcount > 0
 
@@ -837,15 +840,15 @@ async def check_grocery_item(db: aiosqlite.Connection, item_id: int, is_checked:
 
 
 async def add_grocery_item(db: aiosqlite.Connection, list_id: int, text: str) -> dict:
-    # Get max sort_order
-    cursor = await db.execute(
-        "SELECT MAX(sort_order) as max_order FROM grocery_list_items WHERE grocery_list_id = ?",
-        (list_id,),
-    )
-    row = await cursor.fetchone()
-    next_order = (row["max_order"] or 0) + 1
-
     async with _write_lock:
+        # Get max sort_order inside lock to prevent race condition
+        cursor = await db.execute(
+            "SELECT MAX(sort_order) as max_order FROM grocery_list_items WHERE grocery_list_id = ?",
+            (list_id,),
+        )
+        row = await cursor.fetchone()
+        next_order = (row["max_order"] or 0) + 1
+
         cursor = await db.execute(
             "INSERT INTO grocery_list_items (grocery_list_id, text, sort_order) VALUES (?, ?, ?)",
             (list_id, text, next_order),

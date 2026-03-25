@@ -48,9 +48,7 @@ async def list_pantry_items_endpoint(
     db=Depends(get_db),
 ):
     """List all pantry items, optionally filtered to those expiring soon."""
-    if expiring_within_days is not None:
-        return await db_module.get_expiring_items(db, days_ahead=expiring_within_days)
-    return await db_module.list_pantry_items(db)
+    return await db_module.list_pantry_items(db, expiring_within_days=expiring_within_days)
 
 
 @router.get("/matches")

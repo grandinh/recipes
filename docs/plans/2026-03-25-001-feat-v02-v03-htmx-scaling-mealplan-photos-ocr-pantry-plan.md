@@ -1,7 +1,7 @@
 ---
 title: "Recipe App v0.2/v0.3 — htmx, Scaling, Meal Planner, Photos, OCR, Pantry"
 type: feat
-status: active
+status: implemented
 date: 2026-03-25
 deepened: 2026-03-25
 origin: docs/plans/2026-03-24-001-feat-recipe-app-paprika-replacement-plan.md
