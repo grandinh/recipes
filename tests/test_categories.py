@@ -1,9 +1,6 @@
 """Tests for category CRUD operations."""
 
-import pytest
 
-
-@pytest.mark.asyncio
 async def test_create_category(client):
     resp = await client.post("/api/categories", json={"name": "Vegan"})
     assert resp.status_code == 201
@@ -12,7 +9,6 @@ async def test_create_category(client):
     assert data["id"] is not None
 
 
-@pytest.mark.asyncio
 async def test_list_categories_with_counts(client, sample_recipe):
     await client.post("/api/recipes", json=sample_recipe)
 
@@ -28,7 +24,6 @@ async def test_list_categories_with_counts(client, sample_recipe):
     assert breakfast["recipe_count"] >= 1
 
 
-@pytest.mark.asyncio
 async def test_delete_category(client):
     create_resp = await client.post("/api/categories", json={"name": "ToDelete"})
     cat_id = create_resp.json()["id"]
@@ -37,13 +32,11 @@ async def test_delete_category(client):
     assert resp.status_code == 204
 
 
-@pytest.mark.asyncio
 async def test_delete_category_not_found(client):
     resp = await client.delete("/api/categories/99999")
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_delete_category_preserves_recipes(client, sample_recipe):
     create_resp = await client.post("/api/recipes", json=sample_recipe)
     recipe_id = create_resp.json()["id"]

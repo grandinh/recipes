@@ -2,8 +2,6 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 
 MOCK_RECIPE_HTML = (
     b'<html><head><script type="application/ld+json">'
@@ -32,7 +30,6 @@ def _mock_stream_response(html: bytes = MOCK_RECIPE_HTML, content_type: str = "t
     return mock_resp
 
 
-@pytest.mark.asyncio
 async def test_import_from_url(client):
     mock_resp = _mock_stream_response()
     mock_client = AsyncMock()
@@ -57,7 +54,6 @@ async def test_import_from_url(client):
     assert isinstance(data["warnings"], list)
 
 
-@pytest.mark.asyncio
 async def test_import_duplicate_url(client):
     mock_resp = _mock_stream_response()
     mock_client = AsyncMock()
@@ -84,7 +80,6 @@ async def test_import_duplicate_url(client):
         assert resp2.status_code == 409
 
 
-@pytest.mark.asyncio
 async def test_import_ssrf_blocked(client):
     resp = await client.post(
         "/api/recipes/import",
@@ -94,7 +89,6 @@ async def test_import_ssrf_blocked(client):
     assert "blocked" in resp.json()["detail"].lower() or "scheme" in resp.json()["detail"].lower()
 
 
-@pytest.mark.asyncio
 async def test_import_invalid_scheme(client):
     resp = await client.post(
         "/api/recipes/import",
