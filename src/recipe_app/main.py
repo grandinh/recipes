@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Annotated
 
-import bleach
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,18 +15,6 @@ from recipe_app.db import (
 )
 from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
 from recipe_app.routers import recipes, categories, search, meal_plans, pantry
-
-
-# Allowed HTML tags for sanitization (same as scraper)
-_ALLOWED_TAGS = list(bleach.ALLOWED_TAGS) + ["p", "br", "h1", "h2", "h3", "h4", "ul", "ol", "li", "img"]
-_ALLOWED_ATTRS = {**bleach.ALLOWED_ATTRIBUTES, "img": ["src", "alt"]}
-
-
-def _sanitize(value: str | None) -> str | None:
-    """Sanitize a text field using bleach."""
-    if value is None:
-        return None
-    return bleach.clean(value, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
 
 
 app = FastAPI(title="Recipe Manager", version="0.2.0", lifespan=lifespan)
@@ -202,11 +189,11 @@ def _form_to_recipe_create(form) -> RecipeCreate:
     nutritional_info = _parse_nutrition_form(form)
 
     return RecipeCreate(
-        title=_sanitize(form.get("title", "Untitled")),
-        description=_sanitize(form.get("description")) or None,
+        title=form.get("title", "Untitled"),
+        description=form.get("description") or None,
         ingredients=ingredients,
-        directions=_sanitize(form.get("directions")) or None,
-        notes=_sanitize(form.get("notes")) or None,
+        directions=form.get("directions") or None,
+        notes=form.get("notes") or None,
         source_url=form.get("source_url") or None,
         image_url=form.get("image_url") or None,
         prep_time_minutes=int(form.get("prep_time_minutes")) if form.get("prep_time_minutes") else None,
@@ -214,14 +201,14 @@ def _form_to_recipe_create(form) -> RecipeCreate:
         servings=form.get("servings") or None,
         rating=int(form.get("rating")) if form.get("rating") else None,
         difficulty=form.get("difficulty") or None,
-        cuisine=_sanitize(form.get("cuisine")) or None,
+        cuisine=form.get("cuisine") or None,
         nutritional_info=nutritional_info,
         categories=categories_list,
     )
 
 
 def _form_to_recipe_update(form) -> RecipeUpdate:
-    """Parse HTML form data into a RecipeUpdate model with sanitization."""
+    """Parse HTML form data into a RecipeUpdate model."""
     ingredients_raw = form.get("ingredients", "")
     ingredients = [line.strip() for line in ingredients_raw.split("\n") if line.strip()] or None
 
@@ -231,11 +218,11 @@ def _form_to_recipe_update(form) -> RecipeUpdate:
     nutritional_info = _parse_nutrition_form(form)
 
     return RecipeUpdate(
-        title=_sanitize(form.get("title")) or None,
-        description=_sanitize(form.get("description")) or None,
+        title=form.get("title") or None,
+        description=form.get("description") or None,
         ingredients=ingredients,
-        directions=_sanitize(form.get("directions")) or None,
-        notes=_sanitize(form.get("notes")) or None,
+        directions=form.get("directions") or None,
+        notes=form.get("notes") or None,
         source_url=form.get("source_url") or None,
         image_url=form.get("image_url") or None,
         prep_time_minutes=int(form.get("prep_time_minutes")) if form.get("prep_time_minutes") else None,
@@ -243,7 +230,7 @@ def _form_to_recipe_update(form) -> RecipeUpdate:
         servings=form.get("servings") or None,
         rating=int(form.get("rating")) if form.get("rating") else None,
         difficulty=form.get("difficulty") or None,
-        cuisine=_sanitize(form.get("cuisine")) or None,
+        cuisine=form.get("cuisine") or None,
         nutritional_info=nutritional_info,
         categories=categories_list,
     )

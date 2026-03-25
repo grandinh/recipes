@@ -16,6 +16,7 @@ from fastapi import Request
 
 from recipe_app.config import settings
 from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
+from recipe_app.sanitize import sanitize_field, sanitize_url
 from recipe_app.scraper import sanitize_fts5_query  # noqa: F401 — used in search_recipes
 
 logger = logging.getLogger(__name__)
@@ -163,7 +164,13 @@ async def init_schema(db: aiosqlite.Connection) -> None:
     await db.executescript(sql)
 
 
+_KNOWN_TABLES = {"recipes", "categories", "recipe_categories", "meal_plans",
+                 "meal_plan_entries", "grocery_lists", "grocery_list_items", "pantry_items"}
+
+
 async def _column_exists(db: aiosqlite.Connection, table: str, column: str) -> bool:
+    if table not in _KNOWN_TABLES:
+        raise ValueError(f"Unknown table: {table}")
     cursor = await db.execute(f"PRAGMA table_info({table})")
     return any(row["name"] == column for row in await cursor.fetchall())
 
@@ -323,6 +330,24 @@ async def connect() -> aiosqlite.Connection:
 
 async def create_recipe(db: aiosqlite.Connection, data: RecipeCreate) -> dict:
     """Insert a new recipe with FTS5 and category rows.  Returns full dict."""
+    # Sanitize text fields at the db layer so all entry points (web, API, MCP) are covered
+    if data.title:
+        data.title = sanitize_field(data.title)
+    if data.description:
+        data.description = sanitize_field(data.description)
+    if data.directions:
+        data.directions = sanitize_field(data.directions)
+    if data.notes:
+        data.notes = sanitize_field(data.notes)
+    if data.cuisine:
+        data.cuisine = sanitize_field(data.cuisine)
+    if data.source_url:
+        data.source_url = sanitize_url(data.source_url)
+    if data.image_url:
+        data.image_url = sanitize_url(data.image_url)
+    if data.ingredients:
+        data.ingredients = [sanitize_field(i) or i for i in data.ingredients]
+
     fields = data.model_dump(exclude={"categories"}, exclude_none=True)
 
     # Serialise complex fields
@@ -384,6 +409,24 @@ async def update_recipe(
     data: RecipeUpdate,
 ) -> dict | None:
     """Update non-None fields.  Returns updated dict or None if not found."""
+    # Sanitize text fields at the db layer
+    if data.title:
+        data.title = sanitize_field(data.title)
+    if data.description:
+        data.description = sanitize_field(data.description)
+    if data.directions:
+        data.directions = sanitize_field(data.directions)
+    if data.notes:
+        data.notes = sanitize_field(data.notes)
+    if data.cuisine:
+        data.cuisine = sanitize_field(data.cuisine)
+    if data.source_url:
+        data.source_url = sanitize_url(data.source_url)
+    if data.image_url:
+        data.image_url = sanitize_url(data.image_url)
+    if data.ingredients:
+        data.ingredients = [sanitize_field(i) or i for i in data.ingredients]
+
     # Check existence first
     cursor = await db.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,))
     existing = await cursor.fetchone()
@@ -885,8 +928,11 @@ async def add_pantry_item(
     return await cursor.fetchone()
 
 
+_PANTRY_COLUMNS = {"name", "category", "quantity", "unit", "expiration_date"}
+
+
 async def update_pantry_item(db: aiosqlite.Connection, item_id: int, **kwargs) -> dict | None:
-    fields = {k: v for k, v in kwargs.items() if v is not None}
+    fields = {k: v for k, v in kwargs.items() if v is not None and k in _PANTRY_COLUMNS}
     if not fields:
         cursor = await db.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,))
         return await cursor.fetchone()
