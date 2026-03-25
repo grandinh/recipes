@@ -20,7 +20,8 @@
 
   <form method="post"
         action="{% if recipe %}/edit/{{ recipe.id }}{% else %}/add{% endif %}"
-        class="recipe-form">
+        class="recipe-form"
+        enctype="multipart/form-data">
 
     <div class="form-group">
       <label for="title">Title <span class="required">*</span></label>
@@ -60,6 +61,15 @@
         <input type="url" id="image_url" name="image_url" class="input"
                value="{{ recipe.image_url if recipe and recipe.image_url else '' }}">
       </div>
+    </div>
+
+    {# Photo upload #}
+    <div class="form-group">
+      <label for="photo">Upload Photo <span class="hint">(JPEG, PNG, or WebP, max 10MB)</span></label>
+      <input type="file" id="photo" name="photo" accept="image/jpeg,image/png,image/webp" class="input">
+      {% if recipe and recipe.photo_path %}
+        <p class="hint">Current photo: <img src="/photos/thumbnails/{{ recipe.photo_path }}" alt="Current" style="max-height: 80px; vertical-align: middle;"></p>
+      {% endif %}
     </div>
 
     <div class="form-row">
@@ -118,7 +128,7 @@
 
     <fieldset class="form-group">
       <legend>Nutritional Info <span class="hint">(optional)</span></legend>
-      <div class="nutrition-fields" id="nutritionFields">
+      <div class="nutrition-fields" id="nutritionRows">
         {% if recipe and recipe.nutritional_info %}
           {% for key, value in recipe.nutritional_info.items() %}
             <div class="form-row nutrition-row">
@@ -132,7 +142,7 @@
           <input type="text" name="nutrition_value" class="input" placeholder="e.g. 350 kcal">
         </div>
       </div>
-      <button type="button" class="btn btn-small" onclick="addNutritionRow()">+ Add Row</button>
+      <button type="button" class="btn btn-small" id="addNutritionRow">+ Add Row</button>
     </fieldset>
 
     <div class="form-actions">
@@ -141,36 +151,4 @@
     </div>
   </form>
 </section>
-
-<script>
-function addNutritionRow() {
-  var container = document.getElementById('nutritionFields');
-  var row = document.createElement('div');
-  row.className = 'form-row nutrition-row';
-  row.innerHTML = '<input type="text" name="nutrition_key" class="input" placeholder="e.g. Calories">'
-    + '<input type="text" name="nutrition_value" class="input" placeholder="e.g. 350 kcal">';
-  container.appendChild(row);
-}
-
-{% if not recipe %}
-document.getElementById('importForm').addEventListener('submit', function(e) {
-  e.preventDefault();
-  var url = this.querySelector('[name=url]').value;
-  var btn = this.querySelector('button');
-  btn.textContent = 'Importing...';
-  btn.disabled = true;
-  fetch('/api/recipes/import', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({url: url})
-  })
-  .then(function(r) {
-    if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || 'Import failed'); });
-    return r.json();
-  })
-  .then(function(data) { window.location.href = '/edit/' + data.recipe.id; })
-  .catch(function(err) { alert(err.message); btn.textContent = 'Import'; btn.disabled = false; });
-});
-{% endif %}
-</script>
 {% endblock %}

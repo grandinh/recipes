@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Meal Plans — Recipe Manager{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1>Meal Plans</h1>
+</section>
+
+<section class="create-form-section">
+  <form method="post" action="/meal-plans" class="inline-create-form">
+    <input type="text" name="name" placeholder="New meal plan name..." required class="input" style="flex: 1;">
+    <button type="submit" class="btn btn-primary">Create Plan</button>
+  </form>
+</section>
+
+{% if plans %}
+  <section class="plans-list">
+    {% for plan in plans %}
+      <div class="plan-card">
+        <a href="/meal-plans/{{ plan.id }}" class="plan-link">
+          <h2>{{ plan.name }}</h2>
+          <p class="plan-meta">
+            {{ plan.entry_count or 0 }} recipe{{ "s" if (plan.entry_count or 0) != 1 else "" }}
+            &middot; Created {{ plan.created_at[:10] }}
+          </p>
+        </a>
+        <form method="post" action="/meal-plans/{{ plan.id }}/delete" class="inline-form"
+              hx-confirm="Delete this meal plan?">
+          <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+        </form>
+      </div>
+    {% endfor %}
+  </section>
+{% else %}
+  <section class="empty-state">
+    <h2>No meal plans yet</h2>
+    <p>Create your first meal plan above to start organizing your meals.</p>
+  </section>
+{% endif %}
+{% endblock %}

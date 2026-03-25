@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}{{ plan.name }} — Recipe Manager{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1>{{ plan.name }}</h1>
+  <div class="detail-actions">
+    <a href="/meal-plans" class="btn btn-secondary">Back to Plans</a>
+    <a href="/grocery-lists" class="btn btn-secondary">
+      Generate Grocery List
+    </a>
+  </div>
+</section>
+
+{# Generate grocery list from this plan #}
+<section class="generate-grocery">
+  <form method="post" action="/grocery-lists/generate" class="inline-create-form">
+    <input type="hidden" name="meal_plan_id" value="{{ plan.id }}">
+    <input type="text" name="name" placeholder="Grocery list name..." value="{{ plan.name }} Shopping List" class="input" style="flex: 1;">
+    <button type="submit" class="btn btn-primary">Generate Grocery List</button>
+  </form>
+</section>
+
+{# Add recipe to plan #}
+<section class="add-entry-section">
+  <h2>Add Recipe</h2>
+  <form method="post" action="/meal-plans/{{ plan.id }}/add-recipe"
+        hx-post="/meal-plans/{{ plan.id }}/add-recipe"
+        hx-target="#entries-list"
+        hx-swap="innerHTML">
+    <div class="form-row">
+      <div class="form-group" style="flex: 2;">
+        <select name="recipe_id" class="input" required>
+          <option value="">Select a recipe...</option>
+          {% for r in all_recipes %}
+            <option value="{{ r.id }}">{{ r.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <input type="date" name="date" class="input" required>
+      </div>
+      <div class="form-group">
+        <select name="meal_slot" class="input" required>
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+          <option value="dinner" selected>Dinner</option>
+          <option value="snack">Snack</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Add</button>
+    </div>
+  </form>
+</section>
+
+{# Entries list #}
+{% block entries_list %}
+<div id="entries-list">
+  {% if plan.entries %}
+    <section class="entries-table">
+      <h2>Planned Meals</h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Meal</th>
+            <th>Recipe</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in plan.entries %}
+            <tr>
+              <td>{{ entry.date }}</td>
+              <td><span class="tag">{{ entry.meal_slot|capitalize }}</span></td>
+              <td><a href="/recipe/{{ entry.recipe_id }}">{{ entry.recipe_title }}</a></td>
+              <td>
+                <form method="post" action="/meal-plans/entries/{{ entry.id }}/remove" class="inline-form">
+                  <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% else %}
+    <section class="empty-state">
+      <h2>No recipes added yet</h2>
+      <p>Use the form above to add recipes to this meal plan.</p>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}
+{% endblock %}

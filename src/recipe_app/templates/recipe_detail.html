@@ -14,13 +14,21 @@
     <div class="detail-actions">
       <a href="/edit/{{ recipe.id }}" class="btn btn-primary">Edit</a>
       <form method="post" action="/delete/{{ recipe.id }}" class="inline-form"
-            onsubmit="return confirm('Delete this recipe? This cannot be undone.');">
+            hx-confirm="Delete this recipe? This cannot be undone.">
         <button type="submit" class="btn btn-danger">Delete</button>
       </form>
+      <button type="button" class="btn btn-secondary" id="cookingModeBtn"
+              data-recipe-id="{{ recipe.id }}">
+        Start Cooking
+      </button>
     </div>
   </header>
 
-  {% if recipe.image_url %}
+  {% if recipe.photo_path %}
+    <div class="detail-image">
+      <img src="/photos/originals/{{ recipe.photo_path }}" alt="{{ recipe.title }}">
+    </div>
+  {% elif recipe.image_url %}
     <div class="detail-image">
       <img src="{{ recipe.image_url }}" alt="{{ recipe.title }}">
     </div>
@@ -50,10 +58,10 @@
         <span class="meta-value">{{ recipe.total_time_minutes }} min</span>
       </div>
     {% endif %}
-    {% if recipe.servings %}
+    {% if recipe.servings or recipe.base_servings %}
       <div class="meta-item">
         <span class="meta-label">Servings</span>
-        <span class="meta-value">{{ recipe.servings }}</span>
+        <span class="meta-value">{{ recipe.servings or recipe.base_servings }}</span>
       </div>
     {% endif %}
     {% if recipe.difficulty %}
@@ -78,15 +86,38 @@
     {% endif %}
   </div>
 
-  {# Ingredients #}
+  {# Scaling widget #}
   {% if recipe.ingredients %}
-    <section class="detail-section">
-      <h2>Ingredients</h2>
-      <ul class="ingredient-list">
+    <section class="detail-section scaling-section">
+      <div class="scaling-controls">
+        <h2>Ingredients</h2>
+        <div class="scale-buttons" id="scaleButtons" data-recipe-id="{{ recipe.id }}"
+             data-base-servings="{{ recipe.base_servings or '' }}"
+             data-ingredients="{{ recipe.ingredients | tojson }}">
+          <button type="button" class="btn btn-sm scale-btn" data-factor="0.5">&times;&#189;</button>
+          <button type="button" class="btn btn-sm scale-btn active" data-factor="1">&times;1</button>
+          <button type="button" class="btn btn-sm scale-btn" data-factor="2">&times;2</button>
+          <button type="button" class="btn btn-sm scale-btn" data-factor="3">&times;3</button>
+          <button type="button" class="btn btn-sm scale-btn" data-factor="4">&times;4</button>
+        </div>
+      </div>
+      <ul class="ingredient-list" id="ingredientList">
         {% for item in recipe.ingredients %}
-          <li>{{ item }}</li>
+          <li class="ingredient-item" data-index="{{ loop.index0 }}">{{ item }}</li>
         {% endfor %}
       </ul>
+      {% if not recipe.base_servings %}
+        <p class="servings-prompt">
+          <em>Set base servings to enable scaling:</em>
+          <input type="number" min="1" max="100" placeholder="e.g. 4" class="input input-sm"
+                 id="baseServingsInput" style="width: 80px; display: inline-block;">
+          <button type="button" class="btn btn-sm btn-secondary" id="setServingsBtn"
+                  hx-put="/api/recipes/{{ recipe.id }}"
+                  hx-include="#baseServingsInput"
+                  hx-vals='{"base_servings": ""}'
+                  hx-disabled-elt="this">Set</button>
+        </p>
+      {% endif %}
     </section>
   {% endif %}
 
@@ -97,7 +128,7 @@
       <div class="directions">
         {% for paragraph in recipe.directions.split('\n') %}
           {% if paragraph.strip() %}
-            <p>{{ paragraph }}</p>
+            <p class="direction-step" data-step="{{ loop.index0 }}">{{ paragraph }}</p>
           {% endif %}
         {% endfor %}
       </div>

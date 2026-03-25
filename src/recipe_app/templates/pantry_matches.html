@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}What Can I Make? — Recipe Manager{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1>What Can I Make?</h1>
+  <div class="detail-actions">
+    <a href="/pantry" class="btn btn-secondary">Back to Pantry</a>
+  </div>
+</section>
+
+{% if pantry_empty %}
+  <section class="empty-state">
+    <h2>Pantry is empty</h2>
+    <p><a href="/pantry">Add items to your pantry</a> first to get recipe suggestions.</p>
+  </section>
+{% elif matches %}
+  <section class="filter-row">
+    <form method="get" action="/pantry/what-can-i-make" class="inline-create-form">
+      <label>Max missing ingredients:</label>
+      <select name="max_missing" class="input" style="width: auto;" onchange="this.form.submit()">
+        {% for n in [0, 1, 2, 3, 5] %}
+          <option value="{{ n }}" {% if max_missing == n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <p class="hint">Found {{ matches|length }} recipe{{ "s" if matches|length != 1 else "" }}</p>
+  </section>
+
+  <section class="recipe-grid">
+    {% for m in matches %}
+      <div class="recipe-card match-card">
+        <a href="/recipe/{{ m.recipe_id }}">
+          <div class="card-body">
+            <div class="match-badge">{{ m.match_percentage|round|int }}%</div>
+            <h2 class="card-title">{{ m.title }}</h2>
+            <p class="card-desc">
+              {{ m.matched_count }}/{{ m.total_ingredients }} ingredients available
+            </p>
+            {% if m.missing_ingredients %}
+              <div class="missing-list">
+                <strong>Missing:</strong>
+                {% for ing in m.missing_ingredients %}
+                  <span class="tag tag-missing">{{ ing }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        </a>
+      </div>
+    {% endfor %}
+  </section>
+{% else %}
+  <section class="empty-state">
+    <h2>No matching recipes</h2>
+    <p>Try increasing the "max missing ingredients" filter, or <a href="/pantry">add more items to your pantry</a>.</p>
+  </section>
+{% endif %}
+{% endblock %}

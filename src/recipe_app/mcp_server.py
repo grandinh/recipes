@@ -188,5 +188,227 @@ async def get_recipe_by_url(url: str) -> dict | None:
     return await db_module.get_recipe_by_url(db, url)
 
 
+# ---------------------------------------------------------------------------
+# Category Tools (previously missing)
+# ---------------------------------------------------------------------------
+
+@mcp.tool
+async def create_category(name: str) -> dict:
+    """Create a new recipe category. Returns the category with its ID."""
+    db = await get_db()
+    return await db_module.create_category(db, name)
+
+
+@mcp.tool
+async def delete_category(category_id: int) -> str:
+    """Delete a category by ID. Does not delete recipes, only removes the tag."""
+    db = await get_db()
+    deleted = await db_module.delete_category(db, category_id)
+    return f"Category {category_id} deleted" if deleted else f"Category {category_id} not found"
+
+
+# ---------------------------------------------------------------------------
+# Scaling Tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool
+async def scale_recipe(recipe_id: int, multiplier: float) -> dict:
+    """Scale a recipe's ingredients by a multiplier. Returns structured data
+    with both scaled ingredient objects and formatted text.
+
+    Example: scale_recipe(42, 2.0) doubles all ingredient quantities.
+    """
+    import asyncio
+    from recipe_app.scaling import scale_recipe_ingredients
+
+    db = await get_db()
+    recipe = await db_module.get_recipe(db, recipe_id)
+    if recipe is None:
+        return {"error": f"Recipe {recipe_id} not found"}
+
+    ingredients = recipe.get("ingredients", [])
+    if not ingredients:
+        return {"error": "Recipe has no ingredients"}
+
+    scaled = await asyncio.to_thread(scale_recipe_ingredients, ingredients, multiplier)
+    formatted_lines = [s["scaled_text"] for s in scaled]
+
+    return {
+        "recipe_id": recipe_id,
+        "title": recipe["title"],
+        "multiplier": multiplier,
+        "scaled_ingredients": scaled,
+        "formatted_text": "\n".join(formatted_lines),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Meal Plan Tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool
+async def create_meal_plan(name: str) -> dict:
+    """Create a new meal plan. Returns the full plan object with its ID."""
+    db = await get_db()
+    return await db_module.create_meal_plan(db, name)
+
+
+@mcp.tool
+async def get_meal_plan(plan_id: int) -> dict | None:
+    """Get a meal plan with all its entries (recipes assigned to days/slots)."""
+    db = await get_db()
+    return await db_module.get_meal_plan(db, plan_id)
+
+
+@mcp.tool
+async def list_meal_plans() -> list[dict]:
+    """List all meal plans with entry counts."""
+    db = await get_db()
+    return await db_module.list_meal_plans(db)
+
+
+@mcp.tool
+async def update_meal_plan(plan_id: int, name: str) -> dict | None:
+    """Rename a meal plan. Returns the updated plan."""
+    db = await get_db()
+    return await db_module.update_meal_plan(db, plan_id, name)
+
+
+@mcp.tool
+async def delete_meal_plan(plan_id: int) -> str:
+    """Delete a meal plan and all its entries."""
+    db = await get_db()
+    deleted = await db_module.delete_meal_plan(db, plan_id)
+    return f"Meal plan {plan_id} deleted" if deleted else f"Meal plan {plan_id} not found"
+
+
+@mcp.tool
+async def add_recipe_to_meal_plan(
+    plan_id: int,
+    recipe_id: int,
+    date: str,
+    meal_slot: str,
+    servings_override: int | None = None,
+) -> dict:
+    """Add a recipe to a meal plan. meal_slot must be one of: breakfast, lunch, dinner, snack.
+    date format: YYYY-MM-DD. Returns the created entry."""
+    db = await get_db()
+    return await db_module.add_meal_plan_entry(db, plan_id, recipe_id, date, meal_slot, servings_override)
+
+
+@mcp.tool
+async def remove_recipe_from_meal_plan(entry_id: int) -> str:
+    """Remove a recipe entry from a meal plan."""
+    db = await get_db()
+    deleted = await db_module.remove_meal_plan_entry(db, entry_id)
+    return f"Entry {entry_id} removed" if deleted else f"Entry {entry_id} not found"
+
+
+# ---------------------------------------------------------------------------
+# Grocery List Tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool
+async def generate_grocery_list(
+    meal_plan_id: int | None = None,
+    recipe_ids: list[int] | None = None,
+    name: str | None = None,
+) -> dict:
+    """Generate a grocery list from a meal plan or list of recipe IDs.
+    Aggregates ingredients across recipes. Returns the full list with items."""
+    db = await get_db()
+    return await db_module.generate_grocery_list(db, name=name, meal_plan_id=meal_plan_id, recipe_ids=recipe_ids)
+
+
+@mcp.tool
+async def get_grocery_list(list_id: int) -> dict | None:
+    """Get a grocery list with all its items."""
+    db = await get_db()
+    return await db_module.get_grocery_list(db, list_id)
+
+
+@mcp.tool
+async def list_grocery_lists() -> list[dict]:
+    """List all grocery lists with item counts."""
+    db = await get_db()
+    return await db_module.list_grocery_lists(db)
+
+
+@mcp.tool
+async def delete_grocery_list(list_id: int) -> str:
+    """Delete a grocery list and all its items."""
+    db = await get_db()
+    deleted = await db_module.delete_grocery_list(db, list_id)
+    return f"Grocery list {list_id} deleted" if deleted else f"Grocery list {list_id} not found"
+
+
+# ---------------------------------------------------------------------------
+# Pantry Tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool
+async def add_pantry_item(
+    name: str,
+    category: str | None = None,
+    quantity: float | None = None,
+    unit: str | None = None,
+    expiration_date: str | None = None,
+) -> dict:
+    """Add an item to the pantry. Name must be unique (case-insensitive).
+    Returns the created item."""
+    db = await get_db()
+    return await db_module.add_pantry_item(db, name, category, quantity, unit, expiration_date)
+
+
+@mcp.tool
+async def delete_pantry_item(item_id: int) -> str:
+    """Permanently delete a pantry item."""
+    db = await get_db()
+    deleted = await db_module.delete_pantry_item(db, item_id)
+    return f"Pantry item {item_id} deleted" if deleted else f"Pantry item {item_id} not found"
+
+
+@mcp.tool
+async def list_pantry_items(expiring_within_days: int | None = None) -> list[dict]:
+    """List pantry items. Optionally filter to items expiring within N days."""
+    db = await get_db()
+    return await db_module.list_pantry_items(db, expiring_within_days)
+
+
+@mcp.tool
+async def update_pantry_item(
+    item_id: int,
+    name: str | None = None,
+    category: str | None = None,
+    quantity: float | None = None,
+    unit: str | None = None,
+    expiration_date: str | None = None,
+) -> dict | None:
+    """Update a pantry item. Only provided fields are changed."""
+    db = await get_db()
+    return await db_module.update_pantry_item(
+        db, item_id, name=name, category=category,
+        quantity=quantity, unit=unit, expiration_date=expiration_date,
+    )
+
+
+@mcp.tool
+async def find_recipes_from_pantry(max_missing: int = 2) -> list[dict]:
+    """Find recipes you can make with your current pantry items.
+
+    Returns recipes ranked by ingredient availability percentage.
+    max_missing: maximum number of missing ingredients allowed (default 2).
+    Each result includes matched and missing ingredient lists.
+    """
+    from recipe_app.pantry_matcher import find_matching_recipes as _find
+
+    db = await get_db()
+    pantry = await db_module.list_pantry_items(db)
+    if not pantry:
+        return []
+
+    return await _find(db, pantry, max_missing)
+
+
 def main():
     mcp.run(transport="stdio")
