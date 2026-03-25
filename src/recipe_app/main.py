@@ -12,6 +12,11 @@ from recipe_app.config import settings
 from recipe_app.db import (
     lifespan, get_db, list_recipes, get_recipe, create_recipe,
     update_recipe, delete_recipe, search_recipes, list_categories,
+    list_meal_plans, get_meal_plan, create_meal_plan, add_meal_plan_entry,
+    remove_meal_plan_entry, delete_meal_plan,
+    list_grocery_lists, get_grocery_list, generate_grocery_list,
+    check_grocery_item, add_grocery_item, delete_grocery_list,
+    list_pantry_items, add_pantry_item, delete_pantry_item,
 )
 from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
 from recipe_app.routers import recipes, categories, search, meal_plans, pantry
@@ -148,6 +153,205 @@ async def edit_recipe_form(request: Request, recipe_id: int):
     return templates.TemplateResponse(request, "recipe_form.html", {
         "recipe": recipe,
         "categories": cats,
+    })
+
+
+# --- Meal Plans web UI ---
+
+@app.get("/meal-plans", response_class=HTMLResponse)
+async def meal_plans_page(request: Request):
+    db = get_db(request)
+    plans = await list_meal_plans(db)
+    return templates.TemplateResponse(request, "meal_plans.html", {"plans": plans})
+
+
+@app.get("/meal-plans/{plan_id}", response_class=HTMLResponse)
+async def meal_plan_detail_page(request: Request, plan_id: int):
+    db = get_db(request)
+    plan = await get_meal_plan(db, plan_id)
+    if plan is None:
+        return HTMLResponse("Meal plan not found", status_code=404)
+    all_recipes = await list_recipes(db, limit=1000)
+    return templates.TemplateResponse(request, "meal_plan_detail.html", {
+        "plan": plan, "all_recipes": all_recipes,
+    })
+
+
+@app.post("/meal-plans")
+async def create_meal_plan_submit(request: Request):
+    form = await request.form()
+    db = get_db(request)
+    name = form.get("name", "New Meal Plan")
+    plan = await create_meal_plan(db, name)
+    return RedirectResponse(f"/meal-plans/{plan['id']}", status_code=303)
+
+
+@app.post("/meal-plans/{plan_id}/add-recipe")
+async def add_recipe_to_plan_submit(
+    request: Request, plan_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    form = await request.form()
+    db = get_db(request)
+    await add_meal_plan_entry(
+        db, plan_id,
+        recipe_id=int(form.get("recipe_id")),
+        date=form.get("date"),
+        meal_slot=form.get("meal_slot"),
+    )
+    if hx_request:
+        plan = await get_meal_plan(db, plan_id)
+        return templates.TemplateResponse(
+            request, "meal_plan_detail.html", {"plan": plan, "all_recipes": []},
+            block_name="entries_list",
+        )
+    return RedirectResponse(f"/meal-plans/{plan_id}", status_code=303)
+
+
+@app.post("/meal-plans/entries/{entry_id}/remove")
+async def remove_entry_submit(request: Request, entry_id: int):
+    db = get_db(request)
+    await remove_meal_plan_entry(db, entry_id)
+    referer = request.headers.get("referer", "/meal-plans")
+    return RedirectResponse(referer, status_code=303)
+
+
+@app.post("/meal-plans/{plan_id}/delete")
+async def delete_meal_plan_submit(request: Request, plan_id: int):
+    db = get_db(request)
+    await delete_meal_plan(db, plan_id)
+    return RedirectResponse("/meal-plans", status_code=303)
+
+
+# --- Grocery Lists web UI ---
+
+@app.get("/grocery-lists", response_class=HTMLResponse)
+async def grocery_lists_page(request: Request):
+    db = get_db(request)
+    lists = await list_grocery_lists(db)
+    return templates.TemplateResponse(request, "grocery_lists.html", {"lists": lists})
+
+
+@app.get("/grocery-lists/{list_id}", response_class=HTMLResponse)
+async def grocery_list_detail_page(request: Request, list_id: int):
+    db = get_db(request)
+    glist = await get_grocery_list(db, list_id)
+    if glist is None:
+        return HTMLResponse("Grocery list not found", status_code=404)
+    return templates.TemplateResponse(request, "grocery_list_detail.html", {"glist": glist})
+
+
+@app.post("/grocery-lists/generate")
+async def generate_grocery_list_submit(request: Request):
+    form = await request.form()
+    db = get_db(request)
+    plan_id = int(form.get("meal_plan_id")) if form.get("meal_plan_id") else None
+    name = form.get("name") or None
+    glist = await generate_grocery_list(db, name=name, meal_plan_id=plan_id)
+    return RedirectResponse(f"/grocery-lists/{glist['id']}", status_code=303)
+
+
+@app.post("/grocery-lists/{list_id}/check/{item_id}")
+async def check_item_submit(
+    request: Request, list_id: int, item_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    form = await request.form()
+    db = get_db(request)
+    is_checked = form.get("is_checked") == "1"
+    item = await check_grocery_item(db, item_id, is_checked)
+    if hx_request and item:
+        return templates.TemplateResponse(
+            request, "grocery_list_detail.html",
+            {"item": item, "glist": {"id": list_id}},
+            block_name="grocery_item",
+        )
+    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+
+
+@app.post("/grocery-lists/{list_id}/add-item")
+async def add_item_submit(
+    request: Request, list_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    form = await request.form()
+    db = get_db(request)
+    text = form.get("text", "").strip()
+    if text:
+        await add_grocery_item(db, list_id, text)
+    if hx_request:
+        glist = await get_grocery_list(db, list_id)
+        return templates.TemplateResponse(
+            request, "grocery_list_detail.html", {"glist": glist},
+            block_name="items_list",
+        )
+    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+
+
+@app.post("/grocery-lists/{list_id}/delete")
+async def delete_grocery_list_submit(request: Request, list_id: int):
+    db = get_db(request)
+    await delete_grocery_list(db, list_id)
+    return RedirectResponse("/grocery-lists", status_code=303)
+
+
+# --- Pantry web UI ---
+
+@app.get("/pantry", response_class=HTMLResponse)
+async def pantry_page(request: Request):
+    db = get_db(request)
+    items = await list_pantry_items(db)
+    return templates.TemplateResponse(request, "pantry.html", {"items": items})
+
+
+@app.post("/pantry/add")
+async def add_pantry_submit(
+    request: Request,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    form = await request.form()
+    db = get_db(request)
+    name = form.get("name", "").strip()
+    if name:
+        await add_pantry_item(db, name)
+    if hx_request:
+        items = await list_pantry_items(db)
+        return templates.TemplateResponse(
+            request, "pantry.html", {"items": items},
+            block_name="pantry_list",
+        )
+    return RedirectResponse("/pantry", status_code=303)
+
+
+@app.post("/pantry/delete/{item_id}")
+async def delete_pantry_submit(
+    request: Request, item_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    await delete_pantry_item(db, item_id)
+    if hx_request:
+        items = await list_pantry_items(db)
+        return templates.TemplateResponse(
+            request, "pantry.html", {"items": items},
+            block_name="pantry_list",
+        )
+    return RedirectResponse("/pantry", status_code=303)
+
+
+@app.get("/pantry/what-can-i-make", response_class=HTMLResponse)
+async def pantry_matches_page(request: Request, max_missing: int = 2):
+    from recipe_app.pantry_matcher import find_matching_recipes
+
+    db = get_db(request)
+    items = await list_pantry_items(db)
+    if not items:
+        return templates.TemplateResponse(request, "pantry_matches.html", {
+            "matches": [], "pantry_empty": True, "max_missing": max_missing,
+        })
+    matches = await find_matching_recipes(db, items, max_missing)
+    return templates.TemplateResponse(request, "pantry_matches.html", {
+        "matches": matches, "pantry_empty": False, "max_missing": max_missing,
     })
 
 

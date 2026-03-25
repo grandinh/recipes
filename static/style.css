@@ -261,6 +261,33 @@ select.input { cursor: pointer; }
 .servings-prompt { margin-top: 0.5rem; font-size: 0.9rem; }
 .input-sm { padding: 0.25rem 0.5rem; font-size: 0.9rem; }
 
+/* === Meal Plans, Grocery Lists, Pantry === */
+.inline-create-form { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+.plans-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.plan-card { display: flex; align-items: center; justify-content: space-between; padding: 1rem; background: white; border-radius: 8px; border: 1px solid var(--border, #ddd); }
+.plan-card h2 { margin: 0; font-size: 1.1rem; }
+.plan-meta { margin: 0.25rem 0 0; font-size: 0.85rem; color: var(--text-muted, #888); }
+.plan-link { text-decoration: none; color: inherit; flex: 1; }
+.plan-link:hover h2 { color: var(--accent, #e07c24); }
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th, .data-table td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border, #ddd); }
+.data-table th { font-weight: 600; font-size: 0.85rem; color: var(--text-muted, #888); }
+.generate-grocery, .add-entry-section, .add-item-section, .create-form-section { margin-bottom: 1.5rem; }
+.grocery-items, .pantry-items { list-style: none; padding: 0; margin: 0; }
+.grocery-item, .pantry-item { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border, #eee); }
+.grocery-item.checked { opacity: 0.5; }
+.grocery-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; flex: 1; }
+.grocery-text { flex: 1; }
+.pantry-item-info { display: flex; align-items: center; gap: 0.75rem; flex: 1; flex-wrap: wrap; }
+.pantry-qty { font-size: 0.85rem; color: var(--text-muted, #888); }
+.pantry-expiry { font-size: 0.8rem; color: #c0392b; }
+.match-badge { display: inline-block; background: var(--accent, #e07c24); color: white; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: bold; font-size: 0.9rem; margin-bottom: 0.5rem; }
+.match-card .card-body { padding: 1rem; }
+.missing-list { margin-top: 0.5rem; }
+.tag-missing { background: #fde8e8; color: #c0392b; border-color: #f5c6cb; }
+.filter-row { margin-bottom: 1rem; }
+.inline-form { display: inline; }
+
 /* === Direction step highlighting === */
 .direction-step { cursor: pointer; padding: 4px 0; border-radius: 4px; transition: background 0.15s; }
 .cooking-mode .direction-step:hover { background: rgba(0,0,0,0.04); }

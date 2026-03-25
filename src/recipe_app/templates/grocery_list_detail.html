@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ glist.name }} — Recipe Manager{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1>{{ glist.name }}</h1>
+  <div class="detail-actions">
+    <a href="/grocery-lists" class="btn btn-secondary">Back to Lists</a>
+  </div>
+</section>
+
+{# Add item form #}
+<section class="add-item-section">
+  <form method="post" action="/grocery-lists/{{ glist.id }}/add-item"
+        hx-post="/grocery-lists/{{ glist.id }}/add-item"
+        hx-target="#items-list"
+        hx-swap="innerHTML"
+        class="inline-create-form">
+    <input type="text" name="text" placeholder="Add an item..." required class="input" style="flex: 1;">
+    <button type="submit" class="btn btn-primary">Add</button>
+  </form>
+</section>
+
+{# Items list #}
+{% block items_list %}
+<div id="items-list">
+  {% if glist.items %}
+    <ul class="grocery-items">
+      {% for item in glist.items %}
+        {% block grocery_item scoped %}
+        <li class="grocery-item {% if item.is_checked %}checked{% endif %}" id="item-{{ item.id }}">
+          <form method="post" action="/grocery-lists/{{ glist.id }}/check/{{ item.id }}"
+                hx-post="/grocery-lists/{{ glist.id }}/check/{{ item.id }}"
+                hx-target="#item-{{ item.id }}"
+                hx-swap="outerHTML">
+            <label class="grocery-label">
+              <input type="hidden" name="is_checked" value="{{ '0' if item.is_checked else '1' }}">
+              <input type="checkbox" {% if item.is_checked %}checked{% endif %}
+                     onchange="this.form.requestSubmit()">
+              <span class="grocery-text {% if item.is_checked %}strikethrough{% endif %}">{{ item.text }}</span>
+            </label>
+          </form>
+        </li>
+        {% endblock %}
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty-state">No items yet. Add items above.</p>
+  {% endif %}
+</div>
+{% endblock %}
+{% endblock %}
