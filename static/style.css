@@ -243,10 +243,34 @@ select.input { cursor: pointer; }
   .detail-meta { border: 1px solid #ccc; }
 }
 
+/* === htmx indicators === */
+.htmx-indicator { opacity: 0; transition: opacity 32ms ease-out; font-style: italic; color: var(--text-muted, #888); }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { opacity: 1; transition: opacity 0ms 200ms; }
+
+/* === Cooking mode === */
+.cooking-mode .ingredient-item { cursor: pointer; padding: 4px 0; transition: all 0.15s; }
+.cooking-mode .ingredient-item:hover { background: rgba(0,0,0,0.04); }
+.ingredient-item.strikethrough { text-decoration: line-through; opacity: 0.5; }
+
+/* === Scaling controls === */
+.scaling-controls { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.scale-buttons { display: flex; gap: 0.25rem; }
+.btn-sm { padding: 0.25rem 0.5rem; font-size: 0.85rem; }
+.scale-btn { background: var(--bg-subtle, #f0f0f0); border: 1px solid var(--border, #ddd); border-radius: 4px; cursor: pointer; }
+.scale-btn.active { background: var(--accent, #e07c24); color: white; border-color: var(--accent, #e07c24); }
+.servings-prompt { margin-top: 0.5rem; font-size: 0.9rem; }
+.input-sm { padding: 0.25rem 0.5rem; font-size: 0.9rem; }
+
+/* === Direction step highlighting === */
+.direction-step { cursor: pointer; padding: 4px 0; border-radius: 4px; transition: background 0.15s; }
+.cooking-mode .direction-step:hover { background: rgba(0,0,0,0.04); }
+.direction-step.active-step { background: rgba(224, 124, 36, 0.1); border-left: 3px solid var(--accent, #e07c24); padding-left: 8px; }
+
 /* === Responsive === */
 @media (max-width: 600px) {
   .recipe-grid { grid-template-columns: 1fr; }
   .search-form { flex-direction: column; }
   .form-row { flex-direction: column; gap: 0; }
   .detail-title-row h1 { font-size: 1.35rem; }
+  .scaling-controls { flex-direction: column; align-items: flex-start; }
 }

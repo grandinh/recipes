@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     max_photo_size: int = 10_485_760  # 10MB
     max_response_size: int = 5_242_880  # 5MB for URL fetch
     http_timeout: int = 10
+    photo_dir: Path = Path("/root/recipes/data/photos")
+    anthropic_api_key: str = ""  # For OCR (v0.3)
 
     model_config = {"env_prefix": "RECIPE_"}
 
