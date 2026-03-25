@@ -1,14 +1,11 @@
 """Tests for web UI form POST handlers — redirects, form parsing, error cases."""
 
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Recipe form handlers
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_add_recipe_form(client):
     resp = await client.post(
         "/add",
@@ -24,7 +21,6 @@ async def test_add_recipe_form(client):
     assert "/recipe/" in resp.headers["location"]
 
 
-@pytest.mark.asyncio
 async def test_add_recipe_form_minimal(client):
     resp = await client.post(
         "/add", data={"title": "Minimal"}, follow_redirects=False
@@ -33,7 +29,6 @@ async def test_add_recipe_form_minimal(client):
     assert "/recipe/" in resp.headers["location"]
 
 
-@pytest.mark.asyncio
 async def test_edit_recipe_form(client, create_recipe):
     recipe = await create_recipe()
     resp = await client.post(
@@ -45,7 +40,6 @@ async def test_edit_recipe_form(client, create_recipe):
     assert f"/recipe/{recipe['id']}" in resp.headers["location"]
 
 
-@pytest.mark.asyncio
 async def test_delete_recipe_form(client, create_recipe):
     recipe = await create_recipe()
     resp = await client.post(
@@ -60,7 +54,6 @@ async def test_delete_recipe_form(client, create_recipe):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_create_meal_plan_form(client):
     resp = await client.post(
         "/meal-plans", data={"name": "Weekly"}, follow_redirects=False
@@ -69,7 +62,6 @@ async def test_create_meal_plan_form(client):
     assert "/meal-plans/" in resp.headers["location"]
 
 
-@pytest.mark.asyncio
 async def test_add_recipe_to_plan_form(client, create_recipe, create_meal_plan):
     recipe = await create_recipe()
     plan = await create_meal_plan()
@@ -86,7 +78,6 @@ async def test_add_recipe_to_plan_form(client, create_recipe, create_meal_plan):
     assert f"/meal-plans/{plan['id']}" in resp.headers["location"]
 
 
-@pytest.mark.asyncio
 async def test_delete_meal_plan_form(client, create_meal_plan):
     plan = await create_meal_plan()
     resp = await client.post(
@@ -101,7 +92,6 @@ async def test_delete_meal_plan_form(client, create_meal_plan):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_generate_grocery_list_form(client, create_recipe, create_meal_plan):
     recipe = await create_recipe()
     plan = await create_meal_plan()
@@ -122,7 +112,6 @@ async def test_generate_grocery_list_form(client, create_recipe, create_meal_pla
     assert "/grocery-lists/" in resp.headers["location"]
 
 
-@pytest.mark.asyncio
 async def test_delete_grocery_list_form(client, create_recipe):
     r = await create_recipe()
     gl = await client.post(
@@ -141,7 +130,6 @@ async def test_delete_grocery_list_form(client, create_recipe):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_add_pantry_item_form(client):
     resp = await client.post(
         "/pantry/add", data={"name": "Flour"}, follow_redirects=False
@@ -150,7 +138,6 @@ async def test_add_pantry_item_form(client):
     assert resp.headers["location"] == "/pantry"
 
 
-@pytest.mark.asyncio
 async def test_delete_pantry_item_form(client, create_pantry_item):
     item = await create_pantry_item("To Delete")
     resp = await client.post(

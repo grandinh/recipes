@@ -32,8 +32,8 @@ class TestParseIngredient:
 
     def test_with_preparation(self):
         result = parse_ingredient("2 cloves garlic, minced")
-        assert result["scalable"] is True or result["scalable"] is False
         assert result["original_text"] == "2 cloves garlic, minced"
+        assert result["name"] is not None
 
     def test_whitespace_only(self):
         result = parse_ingredient("   ")

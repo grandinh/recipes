@@ -2,10 +2,7 @@
 
 import asyncio
 
-import pytest
 
-
-@pytest.mark.asyncio
 async def test_foreign_keys_are_enforced(client, create_meal_plan):
     """Canary test: verify PRAGMA foreign_keys = ON is active."""
     plan = await create_meal_plan()
@@ -21,7 +18,6 @@ async def test_foreign_keys_are_enforced(client, create_meal_plan):
     assert resp.status_code != 201, "FK enforcement appears OFF"
 
 
-@pytest.mark.asyncio
 async def test_full_meal_planning_flow(client, create_recipe):
     """Recipe -> meal plan -> add entries -> generate grocery list -> verify items."""
     r1 = await create_recipe(title="Flow Recipe", ingredients=["2 cups flour", "1 egg"])
@@ -47,7 +43,6 @@ async def test_full_meal_planning_flow(client, create_recipe):
     assert len(gl["items"]) > 0
 
 
-@pytest.mark.asyncio
 async def test_delete_recipe_cascades_meal_plan_entries(
     client, create_recipe, create_meal_plan
 ):
@@ -74,7 +69,6 @@ async def test_delete_recipe_cascades_meal_plan_entries(
     assert len(plan_data2.json()["entries"]) == 0
 
 
-@pytest.mark.asyncio
 async def test_delete_meal_plan_nullifies_grocery_list(
     client, create_recipe, create_meal_plan
 ):
@@ -106,7 +100,6 @@ async def test_delete_meal_plan_nullifies_grocery_list(
     assert len(data["items"]) > 0  # Items preserved
 
 
-@pytest.mark.asyncio
 async def test_delete_grocery_list_cascades_items(client, create_recipe):
     """ON DELETE CASCADE: list deletion removes all items."""
     r = await create_recipe(ingredients=["1 egg"])
@@ -126,7 +119,6 @@ async def test_delete_grocery_list_cascades_items(client, create_recipe):
     assert resp2.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_pantry_matches_after_adding_items(
     client, create_recipe, create_pantry_item
 ):
@@ -146,7 +138,6 @@ async def test_pantry_matches_after_adding_items(
     assert "Matching Soup" in titles
 
 
-@pytest.mark.asyncio
 async def test_concurrent_writes_serialized(client, create_recipe):
     """Multiple concurrent writes should not produce SQLITE_BUSY errors."""
     tasks = [create_recipe(title=f"Concurrent {i}") for i in range(5)]

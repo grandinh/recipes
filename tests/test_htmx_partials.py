@@ -1,11 +1,8 @@
 """Tests for HTMX partial rendering — verify fragment vs full-page responses."""
 
-import pytest
-
 HTMX_HEADERS = {"hx-request": "true"}
 
 
-@pytest.mark.asyncio
 async def test_home_full_page(client, create_recipe):
     await create_recipe(title="Full Page Recipe")
     resp = await client.get("/")
@@ -14,7 +11,6 @@ async def test_home_full_page(client, create_recipe):
     assert "Full Page Recipe" in resp.text
 
 
-@pytest.mark.asyncio
 async def test_home_htmx_returns_fragment(client, create_recipe):
     await create_recipe(title="HTMX Recipe")
     resp = await client.get("/", headers=HTMX_HEADERS)
@@ -24,7 +20,6 @@ async def test_home_htmx_returns_fragment(client, create_recipe):
     assert "HTMX Recipe" in resp.text
 
 
-@pytest.mark.asyncio
 async def test_pantry_add_htmx(client):
     resp = await client.post(
         "/pantry/add", data={"name": "Eggs"}, headers=HTMX_HEADERS
@@ -34,7 +29,6 @@ async def test_pantry_add_htmx(client):
     assert "Eggs" in resp.text
 
 
-@pytest.mark.asyncio
 async def test_pantry_delete_htmx(client, create_pantry_item):
     item = await create_pantry_item("To Remove")
     resp = await client.post(
@@ -45,7 +39,6 @@ async def test_pantry_delete_htmx(client, create_pantry_item):
     assert "To Remove" not in resp.text
 
 
-@pytest.mark.asyncio
 async def test_meal_plan_add_recipe_htmx(client, create_recipe, create_meal_plan):
     recipe = await create_recipe()
     plan = await create_meal_plan()
@@ -64,7 +57,6 @@ async def test_meal_plan_add_recipe_htmx(client, create_recipe, create_meal_plan
     assert recipe["title"] in resp.text
 
 
-@pytest.mark.asyncio
 async def test_grocery_add_item_htmx(client, create_recipe):
     r = await create_recipe(ingredients=["1 egg"])
     gl = await client.post(
@@ -78,3 +70,5 @@ async def test_grocery_add_item_htmx(client, create_recipe):
     )
     # Template rendering may fail — document actual behavior
     assert resp.status_code in (200, 500)
+    if resp.status_code == 500:
+        assert "Traceback" not in resp.text

@@ -1,9 +1,6 @@
 """Tests for recipe CRUD operations via the REST API."""
 
-import pytest
 
-
-@pytest.mark.asyncio
 async def test_create_recipe(client, sample_recipe):
     resp = await client.post("/api/recipes", json=sample_recipe)
     assert resp.status_code == 201
@@ -21,7 +18,6 @@ async def test_create_recipe(client, sample_recipe):
     assert data["created_at"] is not None
 
 
-@pytest.mark.asyncio
 async def test_create_recipe_minimal(client):
     resp = await client.post("/api/recipes", json={"title": "Just a Title"})
     assert resp.status_code == 201
@@ -32,13 +28,11 @@ async def test_create_recipe_minimal(client):
     assert data["is_favorite"] is False
 
 
-@pytest.mark.asyncio
 async def test_create_recipe_no_title_fails(client):
     resp = await client.post("/api/recipes", json={"description": "No title"})
     assert resp.status_code == 422
 
 
-@pytest.mark.asyncio
 async def test_get_recipe(client, sample_recipe):
     create_resp = await client.post("/api/recipes", json=sample_recipe)
     recipe_id = create_resp.json()["id"]
@@ -50,13 +44,11 @@ async def test_get_recipe(client, sample_recipe):
     assert data["id"] == recipe_id
 
 
-@pytest.mark.asyncio
 async def test_get_recipe_not_found(client):
     resp = await client.get("/api/recipes/99999")
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_update_recipe(client, sample_recipe):
     create_resp = await client.post("/api/recipes", json=sample_recipe)
     recipe_id = create_resp.json()["id"]
@@ -74,7 +66,6 @@ async def test_update_recipe(client, sample_recipe):
     assert data["prep_time_minutes"] == 10
 
 
-@pytest.mark.asyncio
 async def test_update_recipe_categories(client, sample_recipe):
     create_resp = await client.post("/api/recipes", json=sample_recipe)
     recipe_id = create_resp.json()["id"]
@@ -87,13 +78,11 @@ async def test_update_recipe_categories(client, sample_recipe):
     assert set(resp.json()["categories"]) == {"Dinner", "Comfort Food"}
 
 
-@pytest.mark.asyncio
 async def test_update_recipe_not_found(client):
     resp = await client.patch("/api/recipes/99999", json={"title": "Nope"})
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_delete_recipe(client, sample_recipe):
     create_resp = await client.post("/api/recipes", json=sample_recipe)
     recipe_id = create_resp.json()["id"]
@@ -106,13 +95,11 @@ async def test_delete_recipe(client, sample_recipe):
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_delete_recipe_not_found(client):
     resp = await client.delete("/api/recipes/99999")
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_list_recipes(client, sample_recipe, sample_recipe_2):
     await client.post("/api/recipes", json=sample_recipe)
     await client.post("/api/recipes", json=sample_recipe_2)
@@ -123,7 +110,6 @@ async def test_list_recipes(client, sample_recipe, sample_recipe_2):
     assert len(data) >= 2
 
 
-@pytest.mark.asyncio
 async def test_list_recipes_sort_name(client, sample_recipe, sample_recipe_2):
     await client.post("/api/recipes", json=sample_recipe)
     await client.post("/api/recipes", json=sample_recipe_2)
@@ -134,7 +120,6 @@ async def test_list_recipes_sort_name(client, sample_recipe, sample_recipe_2):
     assert titles == sorted(titles)
 
 
-@pytest.mark.asyncio
 async def test_list_recipes_pagination(client, sample_recipe):
     # Create a few recipes
     for i in range(5):
@@ -147,7 +132,6 @@ async def test_list_recipes_pagination(client, sample_recipe):
     assert len(resp.json()) == 2
 
 
-@pytest.mark.asyncio
 async def test_favorite_flag(client):
     resp = await client.post(
         "/api/recipes", json={"title": "Fav Recipe", "is_favorite": True}
@@ -162,7 +146,6 @@ async def test_favorite_flag(client):
     assert resp.json()["is_favorite"] is False
 
 
-@pytest.mark.asyncio
 async def test_rating_validation(client):
     resp = await client.post(
         "/api/recipes", json={"title": "Bad Rating", "rating": 0}
@@ -175,7 +158,6 @@ async def test_rating_validation(client):
     assert resp.status_code == 422
 
 
-@pytest.mark.asyncio
 async def test_difficulty_validation(client):
     resp = await client.post(
         "/api/recipes", json={"title": "Bad Diff", "difficulty": "impossible"}
@@ -183,7 +165,6 @@ async def test_difficulty_validation(client):
     assert resp.status_code == 422
 
 
-@pytest.mark.asyncio
 async def test_duplicate_source_url(client):
     recipe = {"title": "Recipe A", "source_url": "https://example.com/recipe-1"}
     await client.post("/api/recipes", json=recipe)

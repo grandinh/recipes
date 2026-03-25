@@ -1,9 +1,6 @@
 """Tests for the health endpoint."""
 
-import pytest
 
-
-@pytest.mark.asyncio
 async def test_health_endpoint(client):
     resp = await client.get("/health")
     assert resp.status_code == 200
@@ -13,7 +10,6 @@ async def test_health_endpoint(client):
     assert isinstance(data["recipe_count"], int)
 
 
-@pytest.mark.asyncio
 async def test_health_counts_recipes(client, sample_recipe):
     # Get initial count
     resp1 = await client.get("/health")

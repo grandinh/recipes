@@ -1,9 +1,6 @@
 """Tests for grocery list API endpoints."""
 
-import pytest
 
-
-@pytest.mark.asyncio
 async def test_generate_from_recipe_ids(client, create_recipe):
     r = await create_recipe(ingredients=["2 cups flour", "1 cup milk"])
     resp = await client.post(
@@ -16,7 +13,6 @@ async def test_generate_from_recipe_ids(client, create_recipe):
     assert len(data["items"]) > 0
 
 
-@pytest.mark.asyncio
 async def test_generate_from_meal_plan(client, create_recipe, create_meal_plan):
     recipe = await create_recipe()
     plan = await create_meal_plan()
@@ -38,13 +34,11 @@ async def test_generate_from_meal_plan(client, create_recipe, create_meal_plan):
     assert len(data["items"]) > 0
 
 
-@pytest.mark.asyncio
 async def test_generate_no_input(client):
     resp = await client.post("/api/grocery-lists/generate", json={})
     assert resp.status_code == 400
 
 
-@pytest.mark.asyncio
 async def test_generate_empty_recipe_ids(client):
     resp = await client.post(
         "/api/grocery-lists/generate", json={"recipe_ids": []}
@@ -52,7 +46,6 @@ async def test_generate_empty_recipe_ids(client):
     assert resp.status_code == 400
 
 
-@pytest.mark.asyncio
 async def test_generate_from_recipe_with_no_ingredients(client, create_recipe):
     r = await create_recipe(ingredients=[])
     resp = await client.post(
@@ -63,14 +56,12 @@ async def test_generate_from_recipe_with_no_ingredients(client, create_recipe):
     assert len(data["items"]) == 0
 
 
-@pytest.mark.asyncio
 async def test_list_grocery_lists_empty(client):
     resp = await client.get("/api/grocery-lists")
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-@pytest.mark.asyncio
 async def test_list_grocery_lists(client, create_recipe):
     r = await create_recipe()
     await client.post(
@@ -86,7 +77,6 @@ async def test_list_grocery_lists(client, create_recipe):
     assert len(resp.json()) == 2
 
 
-@pytest.mark.asyncio
 async def test_get_grocery_list(client, create_recipe):
     r = await create_recipe(ingredients=["2 cups flour"])
     gl = await client.post(
@@ -100,13 +90,11 @@ async def test_get_grocery_list(client, create_recipe):
     assert len(data["items"]) > 0
 
 
-@pytest.mark.asyncio
 async def test_get_grocery_list_not_found(client):
     resp = await client.get("/api/grocery-lists/99999")
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_add_manual_item(client, create_recipe):
     r = await create_recipe()
     gl = await client.post(
@@ -120,7 +108,6 @@ async def test_add_manual_item(client, create_recipe):
     assert resp.json()["text"] == "Extra butter"
 
 
-@pytest.mark.asyncio
 async def test_add_item_list_not_found(client):
     resp = await client.post(
         "/api/grocery-lists/99999/items", json={"text": "Nope"}
@@ -128,7 +115,6 @@ async def test_add_item_list_not_found(client):
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_check_item(client, create_recipe):
     r = await create_recipe(ingredients=["1 egg"])
     gl = await client.post(
@@ -143,7 +129,6 @@ async def test_check_item(client, create_recipe):
     assert resp.json()["is_checked"]  # SQLite returns 1 for True
 
 
-@pytest.mark.asyncio
 async def test_check_item_not_found(client):
     resp = await client.patch(
         "/api/grocery-lists/items/99999", json={"is_checked": True}
@@ -151,7 +136,6 @@ async def test_check_item_not_found(client):
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_delete_grocery_list(client, create_recipe):
     r = await create_recipe()
     gl = await client.post(
@@ -165,13 +149,11 @@ async def test_delete_grocery_list(client, create_recipe):
     assert resp2.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_delete_grocery_list_not_found(client):
     resp = await client.delete("/api/grocery-lists/99999")
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_generate_deduplicates_ingredients(client, create_recipe):
     """Same ingredient across two recipes should be aggregated."""
     r1 = await create_recipe(title="Recipe A", ingredients=["2 cups flour"])

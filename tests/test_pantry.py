@@ -1,9 +1,6 @@
 """Tests for pantry API endpoints."""
 
-import pytest
 
-
-@pytest.mark.asyncio
 async def test_add_pantry_item(client):
     resp = await client.post(
         "/api/pantry",
@@ -24,7 +21,6 @@ async def test_add_pantry_item(client):
     assert data["expiration_date"] == "2026-06-01"
 
 
-@pytest.mark.asyncio
 async def test_add_pantry_item_minimal(client):
     resp = await client.post("/api/pantry", json={"name": "Salt"})
     assert resp.status_code == 201
@@ -36,23 +32,22 @@ async def test_add_pantry_item_minimal(client):
     assert data["expiration_date"] is None
 
 
-@pytest.mark.asyncio
 async def test_add_duplicate_name(client, create_pantry_item):
     """UNIQUE COLLATE NOCASE constraint — documents current 500 behavior."""
     await create_pantry_item("Flour")
     resp = await client.post("/api/pantry", json={"name": "flour"})
     # Currently returns 500 due to unhandled IntegrityError
     assert resp.status_code in (409, 500)
+    if resp.status_code == 500:
+        assert "Traceback" not in resp.text
 
 
-@pytest.mark.asyncio
 async def test_list_pantry_items_empty(client):
     resp = await client.get("/api/pantry")
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-@pytest.mark.asyncio
 async def test_list_pantry_items(client, create_pantry_item):
     await create_pantry_item("Flour")
     await create_pantry_item("Sugar")
@@ -62,7 +57,6 @@ async def test_list_pantry_items(client, create_pantry_item):
     assert len(resp.json()) == 3
 
 
-@pytest.mark.asyncio
 async def test_list_expiring_soon(client, create_pantry_item):
     await create_pantry_item("Fresh Milk", expiration_date="2026-03-27")
     await create_pantry_item("Canned Beans", expiration_date="2027-01-01")
@@ -74,7 +68,6 @@ async def test_list_expiring_soon(client, create_pantry_item):
     assert "Fresh Milk" in names
 
 
-@pytest.mark.asyncio
 async def test_update_pantry_item(client, create_pantry_item):
     item = await create_pantry_item("Butter", quantity=1.0, unit="lbs")
     resp = await client.patch(
@@ -84,20 +77,17 @@ async def test_update_pantry_item(client, create_pantry_item):
     assert resp.json()["quantity"] == 0.5
 
 
-@pytest.mark.asyncio
 async def test_update_pantry_item_not_found(client):
     resp = await client.patch("/api/pantry/99999", json={"quantity": 1.0})
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_update_pantry_item_empty_body(client, create_pantry_item):
     item = await create_pantry_item("Olive Oil")
     resp = await client.patch(f"/api/pantry/{item['id']}", json={})
     assert resp.status_code == 400
 
 
-@pytest.mark.asyncio
 async def test_update_rename_to_duplicate(client, create_pantry_item):
     """UNIQUE violation on rename — documents current 500 behavior."""
     await create_pantry_item("Flour")
@@ -106,9 +96,10 @@ async def test_update_rename_to_duplicate(client, create_pantry_item):
         f"/api/pantry/{item2['id']}", json={"name": "Flour"}
     )
     assert resp.status_code in (409, 500)
+    if resp.status_code == 500:
+        assert "Traceback" not in resp.text
 
 
-@pytest.mark.asyncio
 async def test_delete_pantry_item(client, create_pantry_item):
     item = await create_pantry_item("To Delete")
     resp = await client.delete(f"/api/pantry/{item['id']}")
@@ -117,13 +108,11 @@ async def test_delete_pantry_item(client, create_pantry_item):
     assert all(i["name"] != "To Delete" for i in resp2.json())
 
 
-@pytest.mark.asyncio
 async def test_delete_pantry_item_not_found(client):
     resp = await client.delete("/api/pantry/99999")
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_pantry_matches(client, create_recipe, create_pantry_item):
     await create_recipe(
         title="Simple Omelette",
@@ -139,14 +128,12 @@ async def test_pantry_matches(client, create_recipe, create_pantry_item):
     assert data[0]["title"] == "Simple Omelette"
 
 
-@pytest.mark.asyncio
 async def test_pantry_matches_empty_pantry(client):
     resp = await client.get("/api/pantry/matches")
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-@pytest.mark.asyncio
 async def test_pantry_matches_no_matches(client, create_recipe, create_pantry_item):
     await create_recipe(ingredients=["1 lb lobster", "1 cup butter"])
     await create_pantry_item("tofu")
@@ -155,7 +142,6 @@ async def test_pantry_matches_no_matches(client, create_recipe, create_pantry_it
     assert resp.json() == []
 
 
-@pytest.mark.asyncio
 async def test_pantry_matches_max_missing(client, create_recipe, create_pantry_item):
     await create_recipe(
         title="Pasta",
@@ -174,7 +160,6 @@ async def test_pantry_matches_max_missing(client, create_recipe, create_pantry_i
     assert "Pasta" not in titles
 
 
-@pytest.mark.asyncio
 async def test_add_pantry_item_unique_after_delete(client, create_pantry_item):
     """Deleting and re-creating with same name should succeed."""
     item = await create_pantry_item("Flour")
