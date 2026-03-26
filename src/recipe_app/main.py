@@ -19,6 +19,7 @@ from recipe_app.db import (
     list_pantry_items, add_pantry_item, delete_pantry_item,
 )
 from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
+from recipe_app.photos import save_photo, delete_photo
 from recipe_app.routers import recipes, categories, search, meal_plans, pantry
 
 
@@ -63,10 +64,12 @@ _template_dir = Path(__file__).parent / "templates"
 
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
-# Mount photo storage
+# Mount photo storage — ensure dirs exist before mount to avoid first-run race
 _photo_dir = settings.photo_dir
-if _photo_dir.exists():
-    app.mount("/photos", StaticFiles(directory=str(_photo_dir)), name="photos")
+_photo_dir.mkdir(parents=True, exist_ok=True)
+(_photo_dir / "originals").mkdir(exist_ok=True)
+(_photo_dir / "thumbnails").mkdir(exist_ok=True)
+app.mount("/photos", StaticFiles(directory=str(_photo_dir)), name="photos")
 
 # Use Jinja2Blocks for htmx fragment rendering
 templates = Jinja2Blocks(directory=str(_template_dir))
@@ -363,6 +366,10 @@ async def add_recipe_submit(request: Request):
     form = await request.form()
     recipe_data = _form_to_recipe_create(form)
     result = await create_recipe(db, recipe_data)
+
+    # Handle photo upload (outside _write_lock — Pillow processing is CPU-bound)
+    await _handle_photo_upload(form, db, result["id"])
+
     return RedirectResponse(f"/recipe/{result['id']}", status_code=303)
 
 
@@ -370,15 +377,34 @@ async def add_recipe_submit(request: Request):
 async def edit_recipe_submit(request: Request, recipe_id: int):
     db = get_db(request)
     form = await request.form()
+
+    # Fetch old photo path for cleanup if replaced
+    old_recipe = await get_recipe(db, recipe_id)
+    old_photo = old_recipe["photo_path"] if old_recipe else None
+
     recipe_data = _form_to_recipe_update(form)
     await update_recipe(db, recipe_id, recipe_data)
+
+    # Handle photo upload and clean up old file
+    new_photo = await _handle_photo_upload(form, db, recipe_id)
+    if new_photo and old_photo:
+        delete_photo(old_photo)
+
     return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
 
 
 @app.post("/delete/{recipe_id}")
 async def delete_recipe_submit(request: Request, recipe_id: int):
     db = get_db(request)
+    # Fetch photo path before deletion for cleanup
+    recipe = await get_recipe(db, recipe_id)
+    photo_path = recipe["photo_path"] if recipe else None
+
     await delete_recipe(db, recipe_id)
+
+    if photo_path:
+        delete_photo(photo_path)
+
     return RedirectResponse("/", status_code=303)
 
 
@@ -446,6 +472,27 @@ def _parse_nutrition_form(form) -> dict | None:
     values = form.getlist("nutrition_value")
     pairs = {k.strip(): v.strip() for k, v in zip(keys, values) if k.strip() and v.strip()}
     return pairs or None
+
+
+async def _handle_photo_upload(form, db, recipe_id: int) -> str | None:
+    """Extract and process a photo from form data. Returns filename or None."""
+    from starlette.datastructures import UploadFile
+
+    photo = form.get("photo")
+    if not isinstance(photo, UploadFile) or not photo.filename:
+        return None
+
+    raw = await photo.read()
+    if not raw or len(raw) > settings.max_photo_size:
+        return None  # Too large or empty — silently skip
+
+    try:
+        filename = await save_photo(raw)
+    except ValueError:
+        return None  # Invalid image — recipe saved without photo
+
+    await update_recipe(db, recipe_id, RecipeUpdate(photo_path=filename))
+    return filename
 
 
 def run():

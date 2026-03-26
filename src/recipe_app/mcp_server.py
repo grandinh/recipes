@@ -72,6 +72,7 @@ async def create_recipe(
     difficulty: str | None = None,
     rating: int | None = None,
     is_favorite: bool = False,
+    base_servings: int | None = None,
 ) -> dict:
     """Add a new recipe. Only title is required. Returns the full created recipe."""
     db = await get_db()
@@ -89,6 +90,7 @@ async def create_recipe(
         difficulty=difficulty,
         rating=rating,
         is_favorite=is_favorite,
+        base_servings=base_servings,
     )
     return await db_module.create_recipe(db, data)
 
@@ -139,6 +141,7 @@ async def update_recipe(
     difficulty: str | None = None,
     rating: int | None = None,
     is_favorite: bool | None = None,
+    base_servings: int | None = None,
 ) -> dict | None:
     """Update any field of an existing recipe. Only provided fields are changed.
     Returns the full updated recipe."""
@@ -152,6 +155,7 @@ async def update_recipe(
         ("servings", servings), ("prep_time_minutes", prep_time_minutes),
         ("cook_time_minutes", cook_time_minutes), ("cuisine", cuisine),
         ("difficulty", difficulty), ("rating", rating), ("is_favorite", is_favorite),
+        ("base_servings", base_servings),
     ]:
         if value is not None:
             kwargs[field] = value

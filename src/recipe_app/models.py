@@ -23,6 +23,8 @@ class _RecipeFields(BaseModel):
     nutritional_info: dict[str, str | int | float] | None = None
     is_favorite: bool = False
     categories: list[str] | None = None
+    base_servings: int | None = Field(None, ge=1, le=100)
+    photo_path: str | None = None
 
 
 class RecipeCreate(_RecipeFields):
@@ -62,6 +64,8 @@ class RecipeResponse(BaseModel):
     nutritional_info: dict[str, str | int | float] | None = None
     is_favorite: bool = False
     categories: list[str] = Field(default_factory=list)
+    base_servings: int | None = None
+    photo_path: str | None = None
     created_at: datetime
     updated_at: datetime
 
