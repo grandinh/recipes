@@ -1,3 +1,5 @@
+import logging
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -6,12 +8,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2_fragments.fastapi import Jinja2Blocks
 from starlette.types import ASGIApp, Receive, Scope, Send
-from starlette.datastructures import MutableHeaders
+from starlette.datastructures import MutableHeaders, UploadFile
 
 from recipe_app.config import settings
 from recipe_app.db import (
     lifespan, get_db, list_recipes, get_recipe, create_recipe,
     update_recipe, delete_recipe, search_recipes, list_categories,
+    toggle_favorite, set_rating,
     list_meal_plans, get_meal_plan, create_meal_plan, add_meal_plan_entry,
     remove_meal_plan_entry, delete_meal_plan,
     list_grocery_lists, get_grocery_list, generate_grocery_list,
@@ -19,8 +22,10 @@ from recipe_app.db import (
     list_pantry_items, add_pantry_item, delete_pantry_item,
 )
 from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
+from recipe_app.photos import save_photo, delete_photo
 from recipe_app.routers import recipes, categories, search, meal_plans, pantry
 
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Recipe Manager", version="0.2.0", lifespan=lifespan)
 
@@ -63,10 +68,12 @@ _template_dir = Path(__file__).parent / "templates"
 
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
-# Mount photo storage
+# Mount photo storage — ensure dirs exist before mount to avoid first-run race
 _photo_dir = settings.photo_dir
-if _photo_dir.exists():
-    app.mount("/photos", StaticFiles(directory=str(_photo_dir)), name="photos")
+_photo_dir.mkdir(parents=True, exist_ok=True)
+(_photo_dir / "originals").mkdir(exist_ok=True)
+(_photo_dir / "thumbnails").mkdir(exist_ok=True)
+app.mount("/photos", StaticFiles(directory=str(_photo_dir)), name="photos")
 
 # Use Jinja2Blocks for htmx fragment rendering
 templates = Jinja2Blocks(directory=str(_template_dir))
@@ -297,11 +304,21 @@ async def delete_grocery_list_submit(request: Request, list_id: int):
 
 # --- Pantry web UI ---
 
+def _pantry_context(items: list[dict]) -> dict:
+    """Build template context with date strings for expiration highlighting."""
+    today = date.today()
+    return {
+        "items": items,
+        "now": today.isoformat(),
+        "now_plus_7": (today + timedelta(days=7)).isoformat(),
+    }
+
+
 @app.get("/pantry", response_class=HTMLResponse)
 async def pantry_page(request: Request):
     db = get_db(request)
     items = await list_pantry_items(db)
-    return templates.TemplateResponse(request, "pantry.html", {"items": items})
+    return templates.TemplateResponse(request, "pantry.html", _pantry_context(items))
 
 
 @app.post("/pantry/add")
@@ -312,12 +329,13 @@ async def add_pantry_submit(
     form = await request.form()
     db = get_db(request)
     name = form.get("name", "").strip()
+    expiration_date = form.get("expiration_date", "").strip() or None
     if name:
-        await add_pantry_item(db, name)
+        await add_pantry_item(db, name, expiration_date=expiration_date)
     if hx_request:
         items = await list_pantry_items(db)
         return templates.TemplateResponse(
-            request, "pantry.html", {"items": items},
+            request, "pantry.html", _pantry_context(items),
             block_name="pantry_list",
         )
     return RedirectResponse("/pantry", status_code=303)
@@ -333,7 +351,7 @@ async def delete_pantry_submit(
     if hx_request:
         items = await list_pantry_items(db)
         return templates.TemplateResponse(
-            request, "pantry.html", {"items": items},
+            request, "pantry.html", _pantry_context(items),
             block_name="pantry_list",
         )
     return RedirectResponse("/pantry", status_code=303)
@@ -361,7 +379,13 @@ async def pantry_matches_page(request: Request, max_missing: int = 2):
 async def add_recipe_submit(request: Request):
     db = get_db(request)
     form = await request.form()
+
+    # Process photo first (outside _write_lock, Pillow is CPU-bound)
+    photo_filename = await _handle_photo_upload(form)
+
     recipe_data = _form_to_recipe_create(form)
+    if photo_filename:
+        recipe_data.photo_path = photo_filename
     result = await create_recipe(db, recipe_data)
     return RedirectResponse(f"/recipe/{result['id']}", status_code=303)
 
@@ -370,16 +394,118 @@ async def add_recipe_submit(request: Request):
 async def edit_recipe_submit(request: Request, recipe_id: int):
     db = get_db(request)
     form = await request.form()
+    old_recipe = await get_recipe(db, recipe_id)
+    old_photo = old_recipe["photo_path"] if old_recipe else None
+
+    photo_filename = await _handle_photo_upload(form)
+
     recipe_data = _form_to_recipe_update(form)
+    if photo_filename:
+        recipe_data.photo_path = photo_filename
     await update_recipe(db, recipe_id, recipe_data)
+
+    # Clean up old photo after successful DB update
+    if photo_filename and old_photo:
+        await delete_photo(old_photo)
+
     return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
 
 
 @app.post("/delete/{recipe_id}")
 async def delete_recipe_submit(request: Request, recipe_id: int):
     db = get_db(request)
+    # Fetch photo path before deletion for cleanup
+    recipe = await get_recipe(db, recipe_id)
+    photo_path = recipe["photo_path"] if recipe else None
+
     await delete_recipe(db, recipe_id)
+
+    if photo_path:
+        await delete_photo(photo_path)
+
     return RedirectResponse("/", status_code=303)
+
+
+# --- Recipe inline actions ---
+
+@app.post("/recipe/{recipe_id}/base-servings")
+async def set_base_servings_submit(
+    request: Request,
+    recipe_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    form = await request.form()
+    try:
+        value = int(form.get("base_servings", ""))
+    except (ValueError, TypeError):
+        if hx_request:
+            return HTMLResponse("Invalid number", status_code=400)
+        return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+    await update_recipe(db, recipe_id, RecipeUpdate(base_servings=value))
+
+    if hx_request:
+        recipe = await get_recipe(db, recipe_id)
+        if recipe is None:
+            return HTMLResponse("Recipe not found", status_code=404)
+        return templates.TemplateResponse(
+            request, "recipe_detail.html", {"recipe": recipe},
+            block_name="scaling_section",
+        )
+    return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+
+@app.post("/recipe/{recipe_id}/favorite")
+async def toggle_favorite_submit(
+    request: Request,
+    recipe_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    recipe = await toggle_favorite(db, recipe_id)
+    if recipe is None:
+        if hx_request:
+            return HTMLResponse("Recipe not found", status_code=404)
+        return RedirectResponse("/", status_code=303)
+
+    if hx_request:
+        return templates.TemplateResponse(
+            request, "recipe_detail.html", {"recipe": recipe},
+            block_name="favorite_toggle",
+        )
+    return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+
+@app.post("/recipe/{recipe_id}/rate")
+async def set_rating_submit(
+    request: Request,
+    recipe_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    form = await request.form()
+    try:
+        rating = int(form.get("rating", ""))
+        if not 1 <= rating <= 5:
+            raise ValueError("Rating must be 1-5")
+    except (ValueError, TypeError):
+        if hx_request:
+            return HTMLResponse("Invalid rating", status_code=400)
+        return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+    recipe = await set_rating(db, recipe_id, rating)
+    if recipe is None:
+        if hx_request:
+            return HTMLResponse("Recipe not found", status_code=404)
+        return RedirectResponse("/", status_code=303)
+
+    if hx_request:
+        return templates.TemplateResponse(
+            request, "recipe_detail.html", {"recipe": recipe},
+            block_name="rating_widget",
+        )
+    return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
 
 
 def _form_to_recipe_create(form) -> RecipeCreate:
@@ -446,6 +572,24 @@ def _parse_nutrition_form(form) -> dict | None:
     values = form.getlist("nutrition_value")
     pairs = {k.strip(): v.strip() for k, v in zip(keys, values) if k.strip() and v.strip()}
     return pairs or None
+
+
+async def _handle_photo_upload(form) -> str | None:
+    """Extract and process a photo from form data. Returns filename or None."""
+    photo = form.get("photo")
+    if not isinstance(photo, UploadFile) or not photo.filename:
+        return None
+
+    raw = await photo.read()
+    if not raw or len(raw) > settings.max_photo_size:
+        logger.warning("Photo upload skipped: empty or exceeds %d bytes", settings.max_photo_size)
+        return None
+
+    try:
+        return await save_photo(raw)
+    except ValueError as exc:
+        logger.warning("Photo upload rejected: %s", exc)
+        return None
 
 
 def run():

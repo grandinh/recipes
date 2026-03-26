@@ -494,6 +494,42 @@ async def delete_recipe(db: aiosqlite.Connection, recipe_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+async def toggle_favorite(db: aiosqlite.Connection, recipe_id: int) -> dict | None:
+    """Atomically flip is_favorite for a recipe.
+
+    Uses ``1 - is_favorite`` to avoid read-then-write races and skips
+    FTS updates (is_favorite is not indexed).  Returns updated recipe
+    dict or None if not found.
+    """
+    async with _write_lock:
+        cursor = await db.execute(
+            "UPDATE recipes SET is_favorite = 1 - is_favorite WHERE id = ?",
+            (recipe_id,),
+        )
+        await db.commit()
+    if cursor.rowcount == 0:
+        return None
+    return await get_recipe(db, recipe_id)
+
+
+async def set_rating(db: aiosqlite.Connection, recipe_id: int, rating: int) -> dict | None:
+    """Set recipe rating (1-5).  Skips FTS update (rating not indexed).
+
+    Returns updated recipe dict or None if not found.
+    """
+    if not 1 <= rating <= 5:
+        raise ValueError(f"Rating must be 1-5, got {rating}")
+    async with _write_lock:
+        cursor = await db.execute(
+            "UPDATE recipes SET rating = ? WHERE id = ?",
+            (rating, recipe_id),
+        )
+        await db.commit()
+    if cursor.rowcount == 0:
+        return None
+    return await get_recipe(db, recipe_id)
+
+
 async def list_recipes(
     db: aiosqlite.Connection,
     limit: int = 50,

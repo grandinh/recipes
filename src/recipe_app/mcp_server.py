@@ -72,6 +72,7 @@ async def create_recipe(
     difficulty: str | None = None,
     rating: int | None = None,
     is_favorite: bool = False,
+    base_servings: int | None = None,
 ) -> dict:
     """Add a new recipe. Only title is required. Returns the full created recipe."""
     db = await get_db()
@@ -89,6 +90,7 @@ async def create_recipe(
         difficulty=difficulty,
         rating=rating,
         is_favorite=is_favorite,
+        base_servings=base_servings,
     )
     return await db_module.create_recipe(db, data)
 
@@ -139,6 +141,7 @@ async def update_recipe(
     difficulty: str | None = None,
     rating: int | None = None,
     is_favorite: bool | None = None,
+    base_servings: int | None = None,
 ) -> dict | None:
     """Update any field of an existing recipe. Only provided fields are changed.
     Returns the full updated recipe."""
@@ -152,6 +155,7 @@ async def update_recipe(
         ("servings", servings), ("prep_time_minutes", prep_time_minutes),
         ("cook_time_minutes", cook_time_minutes), ("cuisine", cuisine),
         ("difficulty", difficulty), ("rating", rating), ("is_favorite", is_favorite),
+        ("base_servings", base_servings),
     ]:
         if value is not None:
             kwargs[field] = value
@@ -172,6 +176,30 @@ async def delete_recipe(recipe_id: int) -> str:
         return f"Recipe {recipe_id} not found"
     await db_module.delete_recipe(db, recipe_id)
     return f"Recipe {recipe_id} ({existing['title']}) deleted"
+
+
+@mcp.tool
+async def toggle_favorite(recipe_id: int) -> dict:
+    """Toggle a recipe's favorite status. Returns the updated recipe.
+    Uses an atomic SQL flip — no need to read the current state first."""
+    db = await get_db()
+    result = await db_module.toggle_favorite(db, recipe_id)
+    if result is None:
+        return {"error": f"Recipe {recipe_id} not found"}
+    return result
+
+
+@mcp.tool
+async def set_recipe_rating(recipe_id: int, rating: int) -> dict:
+    """Set a recipe's rating (1-5 stars). Returns the updated recipe."""
+    db = await get_db()
+    try:
+        result = await db_module.set_rating(db, recipe_id, rating)
+    except ValueError as e:
+        return {"error": str(e)}
+    if result is None:
+        return {"error": f"Recipe {recipe_id} not found"}
+    return result
 
 
 @mcp.tool

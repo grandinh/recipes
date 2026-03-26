@@ -1,20 +1,50 @@
 /**
  * Recipe Manager — client-side JS
- * Handles: import form, cooking mode, recipe scaling, nutrition rows.
+ * Handles: import form, cooking mode, recipe scaling, nutrition rows, quick rate.
  * All inline scripts have been moved here for CSP compliance.
+ *
+ * All init functions are idempotent (safe to call multiple times) so they
+ * can re-run after HTMX swaps and hx-boost navigation without duplicating
+ * event listeners.
  */
 
 document.addEventListener('DOMContentLoaded', function () {
+  initAll();
+  initHtmxHandlers();
+});
+
+function initAll() {
   initImportForm();
   initCookingMode();
   initScaling();
   initNutritionRows();
-});
+  initQuickRate();
+}
+
+// --- HTMX lifecycle handlers ---
+function initHtmxHandlers() {
+  // Re-init after HTMX swaps (partial updates and hx-boost navigation)
+  document.body.addEventListener('htmx:afterSettle', function (evt) {
+    var target = evt.detail.target;
+    // Boosted navigation replaces <main> content — re-init everything
+    if (target.tagName === 'MAIN' || target.closest('main')) {
+      initAll();
+      return;
+    }
+    // Targeted swaps — only re-init affected widgets
+    if (target.querySelector('#scaleButtons') || target.id === 'scaleButtons' ||
+        target.classList.contains('scaling-section')) {
+      initScaling();
+      _restoreCookingState();
+    }
+  });
+}
 
 // --- Import Form ---
 function initImportForm() {
   var form = document.getElementById('importForm');
-  if (!form) return;
+  if (!form || form._initialized) return;
+  form._initialized = true;
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
@@ -47,78 +77,92 @@ function initImportForm() {
 }
 
 // --- Cooking Mode ---
+// Uses event delegation on document so listeners survive HTMX swaps
+// of the scaling section (which replaces #ingredientList).
+var _cookingState = { active: false, recipeId: null };
+
 function initCookingMode() {
   var btn = document.getElementById('cookingModeBtn');
   if (!btn) return;
 
-  var recipeId = btn.dataset.recipeId;
-  var isCooking = false;
+  _cookingState.recipeId = btn.dataset.recipeId;
 
-  // Restore state
-  var ingredients = document.querySelectorAll('.ingredient-item');
-  ingredients.forEach(function (li) {
-    var key = 'cooking-' + recipeId + '-ingredient-' + li.dataset.index;
-    if (localStorage.getItem(key) === '1') {
-      li.classList.add('strikethrough');
-    }
-  });
+  // Restore strikethrough state from localStorage
+  _restoreCookingState();
 
   // Check if any items are struck through (resume cooking)
-  var hasState = Array.from(ingredients).some(function (li) {
-    return li.classList.contains('strikethrough');
-  });
+  var hasState = document.querySelector('.ingredient-item.strikethrough');
   if (hasState) {
-    isCooking = true;
+    _cookingState.active = true;
     btn.textContent = 'Done Cooking';
     document.body.classList.add('cooking-mode');
   }
 
-  btn.addEventListener('click', function () {
-    if (isCooking) {
-      // Clear cooking state
-      ingredients.forEach(function (li) {
-        li.classList.remove('strikethrough');
-        localStorage.removeItem(
-          'cooking-' + recipeId + '-ingredient-' + li.dataset.index
-        );
-      });
-      isCooking = false;
-      btn.textContent = 'Start Cooking';
-      document.body.classList.remove('cooking-mode');
-    } else {
-      isCooking = true;
-      btn.textContent = 'Done Cooking';
-      document.body.classList.add('cooking-mode');
-    }
-  });
+  // Toggle cooking mode button — guard against duplicate listeners
+  if (!btn._initialized) {
+    btn._initialized = true;
+    btn.addEventListener('click', function () {
+      if (_cookingState.active) {
+        // Clear all cooking state
+        var items = document.querySelectorAll('.ingredient-item');
+        items.forEach(function (li) {
+          li.classList.remove('strikethrough');
+          localStorage.removeItem(
+            'cooking-' + _cookingState.recipeId + '-ingredient-' + li.dataset.index
+          );
+        });
+        _cookingState.active = false;
+        btn.textContent = 'Start Cooking';
+        document.body.classList.remove('cooking-mode');
+      } else {
+        _cookingState.active = true;
+        btn.textContent = 'Done Cooking';
+        document.body.classList.add('cooking-mode');
+      }
+    });
+  }
 
-  // Ingredient click toggles strikethrough
-  ingredients.forEach(function (li) {
-    li.addEventListener('click', function () {
-      if (!isCooking) return;
+  // Ingredient click — event delegation on document (bound once, survives swaps)
+  if (!initCookingMode._delegated) {
+    initCookingMode._delegated = true;
+    document.addEventListener('click', function (e) {
+      var li = e.target.closest('.ingredient-item');
+      if (!li || !_cookingState.active) return;
       li.classList.toggle('strikethrough');
-      var key = 'cooking-' + recipeId + '-ingredient-' + li.dataset.index;
+      var key = 'cooking-' + _cookingState.recipeId + '-ingredient-' + li.dataset.index;
       if (li.classList.contains('strikethrough')) {
         localStorage.setItem(key, '1');
       } else {
         localStorage.removeItem(key);
       }
     });
-  });
 
-  // Sync across tabs
-  window.addEventListener('storage', function (e) {
-    if (!e.key || !e.key.startsWith('cooking-' + recipeId)) return;
-    var idx = e.key.split('-ingredient-')[1];
-    var li = document.querySelector(
-      '.ingredient-item[data-index="' + idx + '"]'
-    );
-    if (li) {
-      if (e.newValue === '1') {
-        li.classList.add('strikethrough');
-      } else {
-        li.classList.remove('strikethrough');
+    // Sync across tabs
+    window.addEventListener('storage', function (e) {
+      if (!e.key || !_cookingState.recipeId ||
+          !e.key.startsWith('cooking-' + _cookingState.recipeId)) return;
+      var idx = e.key.split('-ingredient-')[1];
+      var li = document.querySelector(
+        '.ingredient-item[data-index="' + idx + '"]'
+      );
+      if (li) {
+        if (e.newValue === '1') {
+          li.classList.add('strikethrough');
+        } else {
+          li.classList.remove('strikethrough');
+        }
       }
+    });
+  }
+}
+
+function _restoreCookingState() {
+  if (!_cookingState.recipeId) return;
+  var items = document.querySelectorAll('.ingredient-item');
+  items.forEach(function (li) {
+    var key = 'cooking-' + _cookingState.recipeId + '-ingredient-' + li.dataset.index;
+    if (localStorage.getItem(key) === '1') {
+      li.classList.add('strikethrough');
     }
   });
 }
@@ -126,7 +170,8 @@ function initCookingMode() {
 // --- Recipe Scaling (client-side) ---
 function initScaling() {
   var scaleButtons = document.getElementById('scaleButtons');
-  if (!scaleButtons) return;
+  if (!scaleButtons || scaleButtons._scalingInitialized) return;
+  scaleButtons._scalingInitialized = true;
 
   var ingredientList = document.getElementById('ingredientList');
   var rawIngredients;
@@ -161,21 +206,13 @@ function initScaling() {
     });
 
     // Re-apply cooking mode strikethrough after scaling re-render
-    var recipeId = scaleButtons.dataset.recipeId;
-    items.forEach(function (li) {
-      var key = 'cooking-' + recipeId + '-ingredient-' + li.dataset.index;
-      if (localStorage.getItem(key) === '1') {
-        li.classList.add('strikethrough');
-      }
-    });
+    _restoreCookingState();
   }
 
   function scaleIngredientText(text, factor) {
-    // Simple client-side scaling: find leading numbers/fractions and multiply
     return text.replace(
       /^(\d+(?:\.\d+)?(?:\s*\/\s*\d+)?(?:\s*-\s*\d+(?:\.\d+)?(?:\s*\/\s*\d+)?)?)/,
       function (match) {
-        // Handle ranges like "2-3"
         if (match.includes('-')) {
           var parts = match.split('-');
           return formatNumber(parseFraction(parts[0].trim()) * factor) +
@@ -196,7 +233,6 @@ function initScaling() {
 
   function formatNumber(n) {
     if (n === 0) return '0';
-    // Common cooking fractions
     var fractions = [
       [0.125, '1/8'], [0.25, '1/4'], [0.333, '1/3'],
       [0.5, '1/2'], [0.667, '2/3'], [0.75, '3/4'],
@@ -215,15 +251,32 @@ function initScaling() {
       }
     }
 
-    // No matching fraction — show decimal rounded to 1 place
     return n.toFixed(1).replace(/\.0$/, '');
   }
+}
+
+// --- Quick Rate (star rating click handler) ---
+// Sets hidden input value before HTMX fires the request.
+// Uses event delegation — bound once, survives swaps.
+function initQuickRate() {
+  if (initQuickRate._bound) return;
+  initQuickRate._bound = true;
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.rating-star-btn');
+    if (!btn) return;
+    var widget = btn.closest('#rating-widget');
+    if (!widget) return;
+    var input = widget.querySelector('#ratingValue');
+    if (input) input.value = btn.dataset.rating;
+  });
 }
 
 // --- Nutrition Rows (dynamic add) ---
 function initNutritionRows() {
   var addBtn = document.getElementById('addNutritionRow');
-  if (!addBtn) return;
+  if (!addBtn || addBtn._initialized) return;
+  addBtn._initialized = true;
 
   addBtn.addEventListener('click', function () {
     var container = document.getElementById('nutritionRows');
