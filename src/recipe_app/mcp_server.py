@@ -179,6 +179,30 @@ async def delete_recipe(recipe_id: int) -> str:
 
 
 @mcp.tool
+async def toggle_favorite(recipe_id: int) -> dict:
+    """Toggle a recipe's favorite status. Returns the updated recipe.
+    Uses an atomic SQL flip — no need to read the current state first."""
+    db = await get_db()
+    result = await db_module.toggle_favorite(db, recipe_id)
+    if result is None:
+        return {"error": f"Recipe {recipe_id} not found"}
+    return result
+
+
+@mcp.tool
+async def set_recipe_rating(recipe_id: int, rating: int) -> dict:
+    """Set a recipe's rating (1-5 stars). Returns the updated recipe."""
+    db = await get_db()
+    try:
+        result = await db_module.set_rating(db, recipe_id, rating)
+    except ValueError as e:
+        return {"error": str(e)}
+    if result is None:
+        return {"error": f"Recipe {recipe_id} not found"}
+    return result
+
+
+@mcp.tool
 async def list_categories() -> list[dict]:
     """List all recipe categories with the number of recipes in each."""
     db = await get_db()

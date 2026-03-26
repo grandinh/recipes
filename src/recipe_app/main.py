@@ -1,3 +1,5 @@
+import logging
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -6,7 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2_fragments.fastapi import Jinja2Blocks
 from starlette.types import ASGIApp, Receive, Scope, Send
-from starlette.datastructures import MutableHeaders
+from starlette.datastructures import MutableHeaders, UploadFile
 
 from recipe_app.config import settings
 from recipe_app.db import (
@@ -23,6 +25,7 @@ from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
 from recipe_app.photos import save_photo, delete_photo
 from recipe_app.routers import recipes, categories, search, meal_plans, pantry
 
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Recipe Manager", version="0.2.0", lifespan=lifespan)
 
@@ -303,12 +306,11 @@ async def delete_grocery_list_submit(request: Request, list_id: int):
 
 def _pantry_context(items: list[dict]) -> dict:
     """Build template context with date strings for expiration highlighting."""
-    from datetime import date, timedelta
-    today = date.today().isoformat()
+    today = date.today()
     return {
         "items": items,
-        "now": today,
-        "now_plus_7": (date.today() + timedelta(days=7)).isoformat(),
+        "now": today.isoformat(),
+        "now_plus_7": (today + timedelta(days=7)).isoformat(),
     }
 
 
@@ -377,12 +379,14 @@ async def pantry_matches_page(request: Request, max_missing: int = 2):
 async def add_recipe_submit(request: Request):
     db = get_db(request)
     form = await request.form()
+
+    # Process photo first (outside _write_lock, Pillow is CPU-bound)
+    photo_filename = await _handle_photo_upload(form)
+
     recipe_data = _form_to_recipe_create(form)
+    if photo_filename:
+        recipe_data.photo_path = photo_filename
     result = await create_recipe(db, recipe_data)
-
-    # Handle photo upload (outside _write_lock — Pillow processing is CPU-bound)
-    await _handle_photo_upload(form, db, result["id"])
-
     return RedirectResponse(f"/recipe/{result['id']}", status_code=303)
 
 
@@ -390,18 +394,19 @@ async def add_recipe_submit(request: Request):
 async def edit_recipe_submit(request: Request, recipe_id: int):
     db = get_db(request)
     form = await request.form()
-
-    # Fetch old photo path for cleanup if replaced
     old_recipe = await get_recipe(db, recipe_id)
     old_photo = old_recipe["photo_path"] if old_recipe else None
 
+    photo_filename = await _handle_photo_upload(form)
+
     recipe_data = _form_to_recipe_update(form)
+    if photo_filename:
+        recipe_data.photo_path = photo_filename
     await update_recipe(db, recipe_id, recipe_data)
 
-    # Handle photo upload and clean up old file
-    new_photo = await _handle_photo_upload(form, db, recipe_id)
-    if new_photo and old_photo:
-        delete_photo(old_photo)
+    # Clean up old photo after successful DB update
+    if photo_filename and old_photo:
+        await delete_photo(old_photo)
 
     return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
 
@@ -416,7 +421,7 @@ async def delete_recipe_submit(request: Request, recipe_id: int):
     await delete_recipe(db, recipe_id)
 
     if photo_path:
-        delete_photo(photo_path)
+        await delete_photo(photo_path)
 
     return RedirectResponse("/", status_code=303)
 
@@ -569,25 +574,22 @@ def _parse_nutrition_form(form) -> dict | None:
     return pairs or None
 
 
-async def _handle_photo_upload(form, db, recipe_id: int) -> str | None:
+async def _handle_photo_upload(form) -> str | None:
     """Extract and process a photo from form data. Returns filename or None."""
-    from starlette.datastructures import UploadFile
-
     photo = form.get("photo")
     if not isinstance(photo, UploadFile) or not photo.filename:
         return None
 
     raw = await photo.read()
     if not raw or len(raw) > settings.max_photo_size:
-        return None  # Too large or empty — silently skip
+        logger.warning("Photo upload skipped: empty or exceeds %d bytes", settings.max_photo_size)
+        return None
 
     try:
-        filename = await save_photo(raw)
-    except ValueError:
-        return None  # Invalid image — recipe saved without photo
-
-    await update_recipe(db, recipe_id, RecipeUpdate(photo_path=filename))
-    return filename
+        return await save_photo(raw)
+    except ValueError as exc:
+        logger.warning("Photo upload rejected: %s", exc)
+        return None
 
 
 def run():

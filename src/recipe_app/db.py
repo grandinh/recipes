@@ -517,6 +517,8 @@ async def set_rating(db: aiosqlite.Connection, recipe_id: int, rating: int) -> d
 
     Returns updated recipe dict or None if not found.
     """
+    if not 1 <= rating <= 5:
+        raise ValueError(f"Rating must be 1-5, got {rating}")
     async with _write_lock:
         cursor = await db.execute(
             "UPDATE recipes SET rating = ? WHERE id = ?",

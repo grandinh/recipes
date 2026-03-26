@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import io
 import uuid
-from pathlib import Path
-
 from PIL import Image, ImageOps
 
 from .config import settings
@@ -43,15 +41,10 @@ def process_photo_sync(raw_bytes: bytes) -> tuple[str, bytes, bytes]:
         raise ValueError(f"Corrupt image data: {e}")
 
     # Step 3: fix phone rotation via EXIF orientation tag (before resize)
-    img = ImageOps.exif_transpose(img)
+    img = ImageOps.exif_transpose(img) or img
 
     # Step 4: convert to RGB — RGBA/CMYK/P/L cannot save as JPEG
     if img.mode in ("RGBA", "PA"):
-        background = Image.new("RGB", img.size, (255, 255, 255))
-        background.paste(img, mask=img.split()[3])
-        img = background
-    elif img.mode == "P":
-        img = img.convert("RGBA")
         background = Image.new("RGB", img.size, (255, 255, 255))
         background.paste(img, mask=img.split()[3])
         img = background
@@ -96,7 +89,11 @@ async def save_photo(raw_bytes: bytes) -> str:
     return filename
 
 
-def delete_photo(filename: str) -> None:
+async def delete_photo(filename: str) -> None:
     """Best-effort delete of original and thumbnail files."""
-    (settings.photo_dir / "originals" / filename).unlink(missing_ok=True)
-    (settings.photo_dir / "thumbnails" / filename).unlink(missing_ok=True)
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return
+    orig = settings.photo_dir / "originals" / filename
+    thumb = settings.photo_dir / "thumbnails" / filename
+    await asyncio.to_thread(orig.unlink, missing_ok=True)
+    await asyncio.to_thread(thumb.unlink, missing_ok=True)
