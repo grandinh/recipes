@@ -301,11 +301,22 @@ async def delete_grocery_list_submit(request: Request, list_id: int):
 
 # --- Pantry web UI ---
 
+def _pantry_context(items: list[dict]) -> dict:
+    """Build template context with date strings for expiration highlighting."""
+    from datetime import date, timedelta
+    today = date.today().isoformat()
+    return {
+        "items": items,
+        "now": today,
+        "now_plus_7": (date.today() + timedelta(days=7)).isoformat(),
+    }
+
+
 @app.get("/pantry", response_class=HTMLResponse)
 async def pantry_page(request: Request):
     db = get_db(request)
     items = await list_pantry_items(db)
-    return templates.TemplateResponse(request, "pantry.html", {"items": items})
+    return templates.TemplateResponse(request, "pantry.html", _pantry_context(items))
 
 
 @app.post("/pantry/add")
@@ -316,12 +327,13 @@ async def add_pantry_submit(
     form = await request.form()
     db = get_db(request)
     name = form.get("name", "").strip()
+    expiration_date = form.get("expiration_date", "").strip() or None
     if name:
-        await add_pantry_item(db, name)
+        await add_pantry_item(db, name, expiration_date=expiration_date)
     if hx_request:
         items = await list_pantry_items(db)
         return templates.TemplateResponse(
-            request, "pantry.html", {"items": items},
+            request, "pantry.html", _pantry_context(items),
             block_name="pantry_list",
         )
     return RedirectResponse("/pantry", status_code=303)
@@ -337,7 +349,7 @@ async def delete_pantry_submit(
     if hx_request:
         items = await list_pantry_items(db)
         return templates.TemplateResponse(
-            request, "pantry.html", {"items": items},
+            request, "pantry.html", _pantry_context(items),
             block_name="pantry_list",
         )
     return RedirectResponse("/pantry", status_code=303)
