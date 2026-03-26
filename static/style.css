@@ -191,7 +191,11 @@ select.input { cursor: pointer; }
 .detail-header { margin-bottom: 1.25rem; }
 .detail-title-row { display: flex; align-items: baseline; gap: .75rem; }
 .detail-title-row h1 { font-size: 1.75rem; }
-.favorite-indicator { font-size: 1.5rem; color: var(--color-danger); cursor: default; }
+.favorite-toggle {
+  font-size: 1.5rem; color: var(--color-danger); cursor: pointer;
+  background: none; border: none; padding: 0; line-height: 1; font-family: inherit;
+}
+.favorite-toggle:hover { opacity: 0.7; }
 .detail-actions { display: flex; gap: .5rem; margin-top: .75rem; }
 .inline-form { display: inline; }
 
@@ -281,12 +285,34 @@ select.input { cursor: pointer; }
 .pantry-item-info { display: flex; align-items: center; gap: 0.75rem; flex: 1; flex-wrap: wrap; }
 .pantry-qty { font-size: 0.85rem; color: var(--text-muted, #888); }
 .pantry-expiry { font-size: 0.8rem; color: #c0392b; }
+.pantry-expiry.expired { font-weight: 700; background: #fde8e8; padding: 0.1rem 0.4rem; border-radius: 4px; }
+.pantry-expiry.expiring-soon { color: #d4a017; font-weight: 600; }
 .match-badge { display: inline-block; background: var(--accent, #e07c24); color: white; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: bold; font-size: 0.9rem; margin-bottom: 0.5rem; }
 .match-card .card-body { padding: 1rem; }
 .missing-list { margin-top: 0.5rem; }
 .tag-missing { background: #fde8e8; color: #c0392b; border-color: #f5c6cb; }
 .filter-row { margin-bottom: 1rem; }
 .inline-form { display: inline; }
+
+/* === Interactive rating stars === */
+.rating-stars-interactive {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  gap: 0.1em;
+}
+.rating-star-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 1.25rem; color: var(--color-border);
+  padding: 0.25rem; min-width: 44px; min-height: 44px;
+  line-height: 1; text-align: center; font-family: inherit;
+  transition: color 0.1s;
+}
+.rating-star-btn.filled { color: var(--color-star); }
+.rating-star-btn:disabled { cursor: wait; opacity: 0.5; }
+/* Hover preview: hovered star + all siblings after it (visually before due to row-reverse) */
+.rating-star-btn:hover,
+.rating-star-btn:hover ~ .rating-star-btn { color: var(--color-star); }
 
 /* === Direction step highlighting === */
 .direction-step { cursor: pointer; padding: 4px 0; border-radius: 4px; transition: background 0.15s; }

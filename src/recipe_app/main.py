@@ -12,6 +12,7 @@ from recipe_app.config import settings
 from recipe_app.db import (
     lifespan, get_db, list_recipes, get_recipe, create_recipe,
     update_recipe, delete_recipe, search_recipes, list_categories,
+    toggle_favorite, set_rating,
     list_meal_plans, get_meal_plan, create_meal_plan, add_meal_plan_entry,
     remove_meal_plan_entry, delete_meal_plan,
     list_grocery_lists, get_grocery_list, generate_grocery_list,
@@ -406,6 +407,88 @@ async def delete_recipe_submit(request: Request, recipe_id: int):
         delete_photo(photo_path)
 
     return RedirectResponse("/", status_code=303)
+
+
+# --- Recipe inline actions ---
+
+@app.post("/recipe/{recipe_id}/base-servings")
+async def set_base_servings_submit(
+    request: Request,
+    recipe_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    form = await request.form()
+    try:
+        value = int(form.get("base_servings", ""))
+    except (ValueError, TypeError):
+        if hx_request:
+            return HTMLResponse("Invalid number", status_code=400)
+        return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+    await update_recipe(db, recipe_id, RecipeUpdate(base_servings=value))
+
+    if hx_request:
+        recipe = await get_recipe(db, recipe_id)
+        if recipe is None:
+            return HTMLResponse("Recipe not found", status_code=404)
+        return templates.TemplateResponse(
+            request, "recipe_detail.html", {"recipe": recipe},
+            block_name="scaling_section",
+        )
+    return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+
+@app.post("/recipe/{recipe_id}/favorite")
+async def toggle_favorite_submit(
+    request: Request,
+    recipe_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    recipe = await toggle_favorite(db, recipe_id)
+    if recipe is None:
+        if hx_request:
+            return HTMLResponse("Recipe not found", status_code=404)
+        return RedirectResponse("/", status_code=303)
+
+    if hx_request:
+        return templates.TemplateResponse(
+            request, "recipe_detail.html", {"recipe": recipe},
+            block_name="favorite_toggle",
+        )
+    return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+
+@app.post("/recipe/{recipe_id}/rate")
+async def set_rating_submit(
+    request: Request,
+    recipe_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    form = await request.form()
+    try:
+        rating = int(form.get("rating", ""))
+        if not 1 <= rating <= 5:
+            raise ValueError("Rating must be 1-5")
+    except (ValueError, TypeError):
+        if hx_request:
+            return HTMLResponse("Invalid rating", status_code=400)
+        return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+    recipe = await set_rating(db, recipe_id, rating)
+    if recipe is None:
+        if hx_request:
+            return HTMLResponse("Recipe not found", status_code=404)
+        return RedirectResponse("/", status_code=303)
+
+    if hx_request:
+        return templates.TemplateResponse(
+            request, "recipe_detail.html", {"recipe": recipe},
+            block_name="rating_widget",
+        )
+    return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
 
 
 def _form_to_recipe_create(form) -> RecipeCreate:
