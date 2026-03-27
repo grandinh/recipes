@@ -283,6 +283,8 @@ select.input { cursor: pointer; }
 .grocery-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; flex: 1; }
 .grocery-text { flex: 1; }
 .pantry-item-info { display: flex; align-items: center; gap: 0.75rem; flex: 1; flex-wrap: wrap; }
+.pantry-add-form { display: flex; flex-direction: column; gap: 0.5rem; }
+.pantry-add-form .form-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .pantry-qty { font-size: 0.85rem; color: var(--text-muted, #888); }
 .pantry-expiry { font-size: 0.8rem; color: #c0392b; }
 .pantry-expiry.expired { font-weight: 700; background: #fde8e8; padding: 0.1rem 0.4rem; border-radius: 4px; }

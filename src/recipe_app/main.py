@@ -551,11 +551,17 @@ async def add_from_calendar_submit(request: Request):
 
 def _pantry_context(items: list[dict]) -> dict:
     """Build template context with date strings for expiration highlighting."""
+    from recipe_app.aisle_map import _AISLE_DATA
     today = date.today()
+    # Collect unique categories from pantry items + aisle names for datalist
+    pantry_cats = sorted({item["category"] for item in items if item.get("category")})
+    aisle_names = sorted({name for (name, _) in _AISLE_DATA.keys()})
+    categories = sorted(set(pantry_cats + aisle_names))
     return {
         "items": items,
         "now": today.isoformat(),
         "now_plus_7": (today + timedelta(days=7)).isoformat(),
+        "categories": categories,
     }
 
 
@@ -575,8 +581,15 @@ async def add_pantry_submit(
     db = get_db(request)
     name = form.get("name", "").strip()
     expiration_date = form.get("expiration_date", "").strip() or None
+    quantity_str = form.get("quantity", "").strip()
+    quantity = float(quantity_str) if quantity_str else None
+    unit = form.get("unit", "").strip() or None
+    category = form.get("category", "").strip() or None
     if name:
-        await add_pantry_item(db, name, expiration_date=expiration_date)
+        await add_pantry_item(
+            db, name, expiration_date=expiration_date,
+            quantity=quantity, unit=unit, category=category,
+        )
     if hx_request:
         items = await list_pantry_items(db)
         return templates.TemplateResponse(

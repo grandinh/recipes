@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 // Module-level state
 // ---------------------------------------------------------------------------
-var _cookingState = { active: false, recipeId: null };
+var _cookingState = { active: false, recipeId: null, wakeLock: null };
 var _timerIntervalId = null;
 var _timers = [];
 var _audioCtx = null;
@@ -73,6 +73,15 @@ function initHtmxHandlers() {
     // Re-init grocery filter after items list swap
     if (target.id === 'items-list' || target.querySelector('#items-list')) {
       initGroceryFilter();
+    }
+    // Per-item grocery swap — update remaining count (race condition fix)
+    if (target.classList && target.classList.contains('grocery-item')) {
+      _updateGroceryRemaining();
+      _updateAisleEmptyState();
+    }
+    // Calendar grid swap — clear stale form fields (race condition fix)
+    if (target.id === 'calendar-grid' || target.querySelector('#calendar-grid')) {
+      _clearCalendarForm();
     }
   });
 
@@ -228,6 +237,10 @@ function initDocumentDelegation() {
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible') {
         _tickAllTimers();
+        // Re-acquire wake lock after tab becomes visible (browser auto-releases on hide)
+        if (_cookingState.active) {
+          _acquireWakeLock();
+        }
       }
     });
   }
@@ -333,10 +346,12 @@ function initCookingMode() {
         });
         localStorage.removeItem('cooking-' + _cookingState.recipeId + '-step');
         _cookingState.active = false;
+        _releaseWakeLock();
         btn.textContent = 'Start Cooking';
         document.body.classList.remove('cooking-mode');
       } else {
         _cookingState.active = true;
+        _acquireWakeLock();
         btn.textContent = 'Done Cooking';
         document.body.classList.add('cooking-mode');
         // Auto-activate step 1
@@ -499,22 +514,23 @@ function initQuickRate() {
   });
 }
 
-// --- Calendar Meal Plan ---
+// --- Calendar ---
+function _clearCalendarForm() {
+  var form = document.getElementById('add-recipe-form');
+  if (!form) return;
+  var dateInput = form.querySelector('[name="date"]');
+  var slotInput = form.querySelector('[name="meal_slot"]');
+  if (dateInput) dateInput.value = '';
+  if (slotInput) slotInput.value = '';
+}
+
 function initCalendar() {
   var grid = document.getElementById('calendar-grid');
   if (!grid || grid._calendarInitialized) return;
   grid._calendarInitialized = true;
 
-  // Reset stale form fields on every grid swap
-  var form = document.getElementById('add-recipe-form');
-  if (form) {
-    var dateInput = form.querySelector('[name="date"]');
-    var slotInput = form.querySelector('[name="meal_slot"]');
-    if (dateInput) dateInput.value = '';
-    if (slotInput) slotInput.value = '';
-  }
-
   // Event delegation: one listener on grid for all "+" buttons
+  var form = document.getElementById('add-recipe-form');
   grid.addEventListener('click', function (e) {
     var addBtn = e.target.closest('.calendar-add-btn');
     if (!addBtn || !form) return;
@@ -853,12 +869,16 @@ function _playBeep() {
   }
 }
 
+var _beepCancelToken = { canceled: false };
+
 function _doBeep() {
   var beepCount = 0;
   var maxBeeps = 5;
+  _beepCancelToken = { canceled: false };
+  var token = _beepCancelToken;
 
   function singleBeep() {
-    if (beepCount >= maxBeeps || !_audioCtx || _audioCtx.state === 'closed') {
+    if (token.canceled || beepCount >= maxBeeps || !_audioCtx || _audioCtx.state === 'closed') {
       _isBeeping = false;
       return;
     }
@@ -884,6 +904,11 @@ function _doBeep() {
 
   // Auto-stop after 60 seconds max
   setTimeout(function () { _isBeeping = false; }, 60000);
+}
+
+function _stopBeeping() {
+  _beepCancelToken.canceled = true;
+  _isBeeping = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -929,4 +954,30 @@ function _updateAisleEmptyState() {
       section.classList.remove('aisle-empty');
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Wake Lock (keeps screen on during cooking mode)
+// ---------------------------------------------------------------------------
+
+var _wakeLockRequestId = 0;
+
+function _acquireWakeLock() {
+  if (!('wakeLock' in navigator) || !_cookingState.active) return;
+  var myId = ++_wakeLockRequestId;
+  navigator.wakeLock.request('screen').then(function (lock) {
+    if (_wakeLockRequestId !== myId || !_cookingState.active) {
+      lock.release();
+      return;
+    }
+    _cookingState.wakeLock = lock;
+  }).catch(function () { /* Permission denied or not supported */ });
+}
+
+function _releaseWakeLock() {
+  _wakeLockRequestId++;
+  if (_cookingState.wakeLock) {
+    _cookingState.wakeLock.release();
+    _cookingState.wakeLock = null;
+  }
 }
