@@ -17,6 +17,7 @@ from recipe_app.db import (
     toggle_favorite, set_rating,
     list_meal_plans, get_meal_plan, create_meal_plan, add_meal_plan_entry,
     remove_meal_plan_entry, delete_meal_plan,
+    get_meal_plan_week, list_recipe_titles,
     list_grocery_lists, get_grocery_list, generate_grocery_list,
     check_grocery_item, add_grocery_item, delete_grocery_list,
     list_pantry_items, add_pantry_item, delete_pantry_item,
@@ -77,6 +78,12 @@ app.mount("/photos", StaticFiles(directory=str(_photo_dir)), name="photos")
 
 # Use Jinja2Blocks for htmx fragment rendering
 templates = Jinja2Blocks(directory=str(_template_dir))
+
+# Custom Jinja2 date filters for calendar view
+templates.env.filters["weekday_short"] = lambda d: d.strftime("%a")
+templates.env.filters["day_num"] = lambda d: d.strftime("%-d")
+templates.env.filters["month_day"] = lambda d: d.strftime("%b %-d")
+templates.env.filters["isodate"] = lambda d: d.isoformat() if hasattr(d, "isoformat") else str(d)
 
 
 # --- Health endpoint ---
@@ -173,15 +180,63 @@ async def meal_plans_page(request: Request):
 
 
 @app.get("/meal-plans/{plan_id}", response_class=HTMLResponse)
-async def meal_plan_detail_page(request: Request, plan_id: int):
+async def meal_plan_detail_page(
+    request: Request,
+    plan_id: int,
+    week: str | None = None,
+    hx_request: Annotated[str | None, Header()] = None,
+):
     db = get_db(request)
-    plan = await get_meal_plan(db, plan_id)
+
+    # Parse and snap to Monday
+    if week:
+        try:
+            week_date = date.fromisoformat(week)
+        except ValueError:
+            return HTMLResponse("Invalid week parameter. Use YYYY-MM-DD format.", status_code=400)
+    else:
+        week_date = date.today()
+    week_start = week_date - timedelta(days=week_date.weekday())  # Monday
+    week_end = week_start + timedelta(days=6)  # Sunday
+
+    plan = await get_meal_plan_week(db, plan_id, week_start.isoformat(), week_end.isoformat())
     if plan is None:
         return HTMLResponse("Meal plan not found", status_code=404)
-    all_recipes = await list_recipes(db, limit=1000)
-    return templates.TemplateResponse(request, "meal_plan_detail.html", {
-        "plan": plan, "all_recipes": all_recipes,
-    })
+
+    all_recipes = await list_recipe_titles(db)
+
+    # Build day list for the calendar grid
+    days = []
+    for i in range(7):
+        d = week_start + timedelta(days=i)
+        days.append(d)
+
+    # Group entries by (date, meal_slot) for the template
+    entries_by_cell = {}
+    for entry in plan.get("entries", []):
+        key = (entry["date"], entry["meal_slot"])
+        entries_by_cell.setdefault(key, []).append(entry)
+
+    prev_week = (week_start - timedelta(days=7)).isoformat()
+    next_week = (week_start + timedelta(days=7)).isoformat()
+
+    context = {
+        "plan": plan,
+        "all_recipes": all_recipes,
+        "days": days,
+        "week_start": week_start,
+        "week_end": week_end,
+        "prev_week": prev_week,
+        "next_week": next_week,
+        "entries_by_cell": entries_by_cell,
+        "today": date.today(),
+        "meal_slots": ["breakfast", "lunch", "dinner", "snack"],
+    }
+
+    block_name = "calendar_grid" if hx_request else None
+    return templates.TemplateResponse(
+        request, "meal_plan_detail.html", context, block_name=block_name
+    )
 
 
 @app.post("/meal-plans")
@@ -200,25 +255,45 @@ async def add_recipe_to_plan_submit(
 ):
     form = await request.form()
     db = get_db(request)
+    entry_date = form.get("date", "")
+    meal_slot = form.get("meal_slot", "")
+
+    # Validate meal_slot
+    valid_slots = {"breakfast", "lunch", "dinner", "snack"}
+    if meal_slot not in valid_slots:
+        return HTMLResponse("Invalid meal slot", status_code=400)
+
     await add_meal_plan_entry(
         db, plan_id,
         recipe_id=int(form.get("recipe_id")),
-        date=form.get("date"),
-        meal_slot=form.get("meal_slot"),
+        date=entry_date,
+        meal_slot=meal_slot,
     )
     if hx_request:
-        plan = await get_meal_plan(db, plan_id)
-        return templates.TemplateResponse(
-            request, "meal_plan_detail.html", {"plan": plan, "all_recipes": []},
-            block_name="entries_list",
-        )
+        # Re-render the calendar grid for the week containing the added entry
+        try:
+            entry_d = date.fromisoformat(entry_date)
+        except ValueError:
+            entry_d = date.today()
+        return await _render_calendar_grid(request, db, plan_id, entry_d)
     return RedirectResponse(f"/meal-plans/{plan_id}", status_code=303)
 
 
-@app.post("/meal-plans/entries/{entry_id}/remove")
-async def remove_entry_submit(request: Request, entry_id: int):
+@app.post("/meal-plans/{plan_id}/entries/{entry_id}/remove")
+async def remove_entry_submit(
+    request: Request, plan_id: int, entry_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    form = await request.form()
     db = get_db(request)
     await remove_meal_plan_entry(db, entry_id)
+    if hx_request:
+        week_str = form.get("week_start", "")
+        try:
+            week_date = date.fromisoformat(week_str)
+        except ValueError:
+            week_date = date.today()
+        return await _render_calendar_grid(request, db, plan_id, week_date)
     referer = request.headers.get("referer", "/meal-plans")
     return RedirectResponse(referer, status_code=303)
 
@@ -228,6 +303,41 @@ async def delete_meal_plan_submit(request: Request, plan_id: int):
     db = get_db(request)
     await delete_meal_plan(db, plan_id)
     return RedirectResponse("/meal-plans", status_code=303)
+
+
+async def _render_calendar_grid(request: Request, db, plan_id: int, ref_date: date):
+    """Re-render the calendar_grid block for the week containing ref_date."""
+    week_start = ref_date - timedelta(days=ref_date.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    plan = await get_meal_plan_week(db, plan_id, week_start.isoformat(), week_end.isoformat())
+    if plan is None:
+        return HTMLResponse("Meal plan not found", status_code=404)
+
+    all_recipes = await list_recipe_titles(db)
+    days = [week_start + timedelta(days=i) for i in range(7)]
+
+    entries_by_cell = {}
+    for entry in plan.get("entries", []):
+        key = (entry["date"], entry["meal_slot"])
+        entries_by_cell.setdefault(key, []).append(entry)
+
+    context = {
+        "plan": plan,
+        "all_recipes": all_recipes,
+        "days": days,
+        "week_start": week_start,
+        "week_end": week_end,
+        "prev_week": (week_start - timedelta(days=7)).isoformat(),
+        "next_week": (week_start + timedelta(days=7)).isoformat(),
+        "entries_by_cell": entries_by_cell,
+        "today": date.today(),
+        "meal_slots": ["breakfast", "lunch", "dinner", "snack"],
+    }
+    return templates.TemplateResponse(
+        request, "meal_plan_detail.html", context,
+        block_name="calendar_grid",
+    )
 
 
 # --- Grocery Lists web UI ---

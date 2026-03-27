@@ -325,6 +325,14 @@ async def add_recipe_to_meal_plan(
 
 
 @mcp.tool
+async def get_meal_plan_week(plan_id: int, week_start: str, week_end: str) -> dict | None:
+    """Get a meal plan with entries filtered to a date range (YYYY-MM-DD, inclusive).
+    Useful for viewing a specific week of a meal plan."""
+    db = await get_db()
+    return await db_module.get_meal_plan_week(db, plan_id, week_start, week_end)
+
+
+@mcp.tool
 async def remove_recipe_from_meal_plan(entry_id: int) -> str:
     """Remove a recipe entry from a meal plan."""
     db = await get_db()
