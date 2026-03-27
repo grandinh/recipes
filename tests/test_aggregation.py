@@ -4,7 +4,7 @@ from fractions import Fraction
 
 import pytest
 
-from recipe_app.db import _aggregate_ingredients
+from recipe_app.aggregation import aggregate_ingredients as _aggregate_ingredients
 
 
 class TestAggregateIngredients:

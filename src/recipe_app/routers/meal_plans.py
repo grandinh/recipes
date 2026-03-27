@@ -136,6 +136,16 @@ async def add_grocery_item_endpoint(
     return await db_module.add_grocery_item(db, list_id, data.text)
 
 
+@router.post("/api/recipes/{recipe_id}/grocery-list", status_code=201)
+async def add_recipe_to_grocery_list_endpoint(
+    recipe_id: int, db=Depends(get_db)
+):
+    try:
+        return await db_module.add_recipe_to_grocery_list(db, recipe_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+
 @router.patch("/api/grocery-lists/items/{item_id}")
 async def update_grocery_item_endpoint(
     item_id: int, data: GroceryItemUpdate, db=Depends(get_db)
