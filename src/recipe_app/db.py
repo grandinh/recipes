@@ -1098,8 +1098,15 @@ async def check_grocery_item(db: aiosqlite.Connection, item_id: int, is_checked:
     return await cursor.fetchone()
 
 
-async def add_grocery_item(db: aiosqlite.Connection, list_id: int, text: str) -> dict:
+async def add_grocery_item(
+    db: aiosqlite.Connection, list_id: int, text: str, aisle: str | None = None,
+) -> dict:
     text = sanitize_field(text)
+    if aisle is not None:
+        aisle = sanitize_field(aisle)
+    else:
+        from recipe_app.aisle_map import assign_aisle
+        aisle = assign_aisle(text)[0]
     async with _write_lock:
         # Get max sort_order inside lock to prevent race condition
         cursor = await db.execute(
@@ -1110,8 +1117,8 @@ async def add_grocery_item(db: aiosqlite.Connection, list_id: int, text: str) ->
         next_order = (row["max_order"] or 0) + 1
 
         cursor = await db.execute(
-            "INSERT INTO grocery_list_items (grocery_list_id, text, sort_order) VALUES (?, ?, ?)",
-            (list_id, text, next_order),
+            "INSERT INTO grocery_list_items (grocery_list_id, text, sort_order, aisle) VALUES (?, ?, ?, ?)",
+            (list_id, text, next_order, aisle),
         )
         await db.commit()
     item_id = cursor.lastrowid
