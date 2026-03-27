@@ -550,6 +550,11 @@ async def test_mcp_move_checked_to_pantry(mcp_client):
     assert len(glist2["items"]) == 0
 
 
+async def test_mcp_move_checked_to_pantry_not_found(mcp_client):
+    result = _parse_result(await mcp_client.call_tool("move_checked_to_pantry", {"list_id": 99999}))
+    assert "error" in result
+
+
 # ---------------------------------------------------------------------------
 # Pantry sanitization
 # ---------------------------------------------------------------------------
@@ -572,7 +577,7 @@ async def test_mcp_pantry_sanitizes_html(mcp_client):
 # ---------------------------------------------------------------------------
 
 
-async def test_mcp_upload_recipe_photo(mcp_client, tmp_path):
+async def test_mcp_upload_recipe_photo(mcp_client):
     """Upload a valid photo via MCP tool."""
     import base64
     from PIL import Image

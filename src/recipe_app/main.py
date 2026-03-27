@@ -562,6 +562,8 @@ async def move_to_pantry_submit(
 ):
     db = get_db(request)
     result = await move_checked_to_pantry(db, list_id)
+    if result is None:
+        return HTMLResponse("Grocery list not found", status_code=404)
     if hx_request:
         glist = await get_grocery_list(db, list_id)
         aisle_groups = _build_aisle_groups(glist)

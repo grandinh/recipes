@@ -453,7 +453,10 @@ async def move_checked_to_pantry(list_id: int) -> dict:
     Items already in the pantry are skipped (no duplicates).
     Returns lists of moved items, already-in-pantry items, and any warnings."""
     db = await get_db()
-    return await db_module.move_checked_to_pantry(db, list_id)
+    result = await db_module.move_checked_to_pantry(db, list_id)
+    if result is None:
+        return {"error": f"Grocery list {list_id} not found"}
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -528,18 +531,23 @@ async def find_recipes_from_pantry(max_missing: int = 2) -> list[dict]:
 async def upload_recipe_photo(
     recipe_id: int,
     image_base64: str,
-    media_type: str = "image/jpeg",
 ) -> dict:
-    """Upload a photo for an existing recipe.
+    """Upload a photo for an existing recipe. All common image formats
+    (JPEG, PNG, WebP) are auto-detected and re-encoded to JPEG.
 
     recipe_id: ID of the recipe to attach the photo to.
-    image_base64: Base64-encoded image data (JPEG, PNG, WebP, or GIF).
-    media_type: MIME type of the image. Default: image/jpeg.
+    image_base64: Base64-encoded image data (max ~10 MB decoded).
     """
+    import binascii
     import base64 as b64
 
     from recipe_app.models import RecipeUpdate
-    from recipe_app.photos import save_photo
+    from recipe_app.photos import delete_photo, save_photo
+
+    MAX_BASE64_SIZE = 14 * 1024 * 1024  # ~10 MB decoded
+
+    if len(image_base64) > MAX_BASE64_SIZE:
+        return {"error": "Image too large (max 10 MB)"}
 
     db = await get_db()
     recipe = await db_module.get_recipe(db, recipe_id)
@@ -548,7 +556,7 @@ async def upload_recipe_photo(
 
     try:
         image_data = b64.b64decode(image_base64)
-    except Exception:
+    except (binascii.Error, ValueError):
         return {"error": "Invalid base64 image data"}
 
     try:
@@ -556,7 +564,11 @@ async def upload_recipe_photo(
     except ValueError as e:
         return {"error": f"Invalid image: {e}"}
 
+    old_photo = recipe.get("photo_path")
     await db_module.update_recipe(db, recipe_id, RecipeUpdate(photo_path=filename))
+    if old_photo:
+        await delete_photo(old_photo)
+
     return {"recipe_id": recipe_id, "photo_path": filename}
 
 

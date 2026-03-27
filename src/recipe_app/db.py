@@ -1076,11 +1076,18 @@ async def clear_checked_grocery_items(db: aiosqlite.Connection, list_id: int) ->
         return {"list_id": list_id, "cleared_count": cursor.rowcount}
 
 
-async def move_checked_to_pantry(db: aiosqlite.Connection, list_id: int) -> dict:
-    """Move checked grocery items to pantry (name-only). Returns summary."""
+async def move_checked_to_pantry(db: aiosqlite.Connection, list_id: int) -> dict | None:
+    """Move checked grocery items to pantry (name-only). Returns None if list not found."""
     async with _write_lock:
         try:
             await db.execute("BEGIN IMMEDIATE")
+
+            cursor = await db.execute(
+                "SELECT id FROM grocery_lists WHERE id = ?", (list_id,),
+            )
+            if not await cursor.fetchone():
+                await db.commit()
+                return None
 
             cursor = await db.execute(
                 "SELECT id, text, normalized_name, aisle FROM grocery_list_items "
@@ -1173,6 +1180,8 @@ async def add_pantry_item(
     name = sanitize_field(name)
     if category:
         category = sanitize_field(category)
+    if unit:
+        unit = sanitize_field(unit)
     async with _write_lock:
         cursor = await db.execute(
             """
@@ -1200,6 +1209,8 @@ async def update_pantry_item(db: aiosqlite.Connection, item_id: int, **kwargs) -
         fields["name"] = sanitize_field(fields["name"])
     if "category" in fields:
         fields["category"] = sanitize_field(fields["category"])
+    if "unit" in fields:
+        fields["unit"] = sanitize_field(fields["unit"])
 
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values()) + [item_id]

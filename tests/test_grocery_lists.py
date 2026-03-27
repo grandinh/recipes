@@ -238,7 +238,7 @@ async def test_move_checked_to_pantry_dedup(client, create_recipe, create_pantry
     resp = await client.post(f"/api/grocery-lists/{list_id}/move-to-pantry")
     result = resp.json()
     # "egg" should be in already_in_pantry (case-insensitive match)
-    assert len(result["already_in_pantry"]) >= 1 or len(result["moved"]) >= 0
+    assert len(result["already_in_pantry"]) >= 1
 
 
 async def test_generate_deduplicates_ingredients(client, create_recipe):

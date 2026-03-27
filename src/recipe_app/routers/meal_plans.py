@@ -174,4 +174,6 @@ async def clear_checked_grocery_items_endpoint(list_id: int, db=Depends(get_db))
 @router.post("/api/grocery-lists/{list_id}/move-to-pantry")
 async def move_checked_to_pantry_endpoint(list_id: int, db=Depends(get_db)):
     result = await db_module.move_checked_to_pantry(db, list_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Grocery list not found")
     return result
