@@ -343,10 +343,12 @@ async def create_recipe(db: aiosqlite.Connection, data: RecipeCreate) -> dict:
         data.cuisine = sanitize_field(data.cuisine)
     if data.source_url:
         data.source_url = sanitize_url(data.source_url)
+    if data.source_url is not None and not data.source_url.strip():
+        data.source_url = None
     if data.image_url:
         data.image_url = sanitize_url(data.image_url)
     if data.ingredients:
-        data.ingredients = [sanitize_field(i) or i for i in data.ingredients]
+        data.ingredients = [sanitize_field(i) for i in data.ingredients]
 
     fields = data.model_dump(exclude={"categories"}, exclude_none=True)
 
@@ -422,10 +424,12 @@ async def update_recipe(
         data.cuisine = sanitize_field(data.cuisine)
     if data.source_url:
         data.source_url = sanitize_url(data.source_url)
+    if data.source_url is not None and not data.source_url.strip():
+        data.source_url = None
     if data.image_url:
         data.image_url = sanitize_url(data.image_url)
     if data.ingredients:
-        data.ingredients = [sanitize_field(i) or i for i in data.ingredients]
+        data.ingredients = [sanitize_field(i) for i in data.ingredients]
 
     # Check existence first
     cursor = await db.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,))
@@ -784,6 +788,39 @@ async def add_meal_plan_entry(
         (entry_id,),
     )
     return await cursor.fetchone()
+
+
+async def get_meal_plan_week(
+    db: aiosqlite.Connection,
+    plan_id: int,
+    week_start: str,
+    week_end: str,
+) -> dict | None:
+    """Get a meal plan with entries filtered to a date range (inclusive)."""
+    cursor = await db.execute("SELECT * FROM meal_plans WHERE id = ?", (plan_id,))
+    plan = await cursor.fetchone()
+    if plan is None:
+        return None
+
+    cursor = await db.execute(
+        """
+        SELECT e.*, r.title as recipe_title, r.image_url as recipe_image_url
+          FROM meal_plan_entries e
+          JOIN recipes r ON r.id = e.recipe_id
+         WHERE e.meal_plan_id = ?
+           AND e.date BETWEEN ? AND ?
+         ORDER BY e.date, e.meal_slot
+        """,
+        (plan_id, week_start, week_end),
+    )
+    entries = await cursor.fetchall()
+    return {**plan, "entries": entries}
+
+
+async def list_recipe_titles(db: aiosqlite.Connection) -> list[dict]:
+    """Lightweight recipe list returning only id and title for pickers."""
+    cursor = await db.execute("SELECT id, title FROM recipes ORDER BY title")
+    return await cursor.fetchall()
 
 
 async def remove_meal_plan_entry(db: aiosqlite.Connection, entry_id: int) -> bool:

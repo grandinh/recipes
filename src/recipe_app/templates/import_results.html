@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Import Results — Recipe Manager{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1>Import Complete</h1>
+</section>
+
+<section class="import-results">
+  <div class="import-summary" style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+    <div class="import-stat" style="background: #e8f5e9; padding: 1rem 1.5rem; border-radius: 8px; flex: 1; min-width: 140px; text-align: center;">
+      <div style="font-size: 2rem; font-weight: 700;">{{ result.imported|length }}</div>
+      <div>Imported</div>
+    </div>
+    <div class="import-stat" style="background: #fff3e0; padding: 1rem 1.5rem; border-radius: 8px; flex: 1; min-width: 140px; text-align: center;">
+      <div style="font-size: 2rem; font-weight: 700;">{{ result.skipped|length }}</div>
+      <div>Skipped</div>
+    </div>
+    <div class="import-stat" style="background: #fde8e8; padding: 1rem 1.5rem; border-radius: 8px; flex: 1; min-width: 140px; text-align: center;">
+      <div style="font-size: 2rem; font-weight: 700;">{{ result.errors|length }}</div>
+      <div>Errors</div>
+    </div>
+  </div>
+
+  {% if result.errors %}
+    <h2>Errors</h2>
+    <ul style="margin-bottom: 1.5rem;">
+      {% for err in result.errors %}
+        <li><strong>{{ err.title }}</strong> — {{ err.error }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if result.skipped %}
+    <h2>Skipped</h2>
+    <ul style="margin-bottom: 1.5rem;">
+      {% for skip in result.skipped %}
+        <li><strong>{{ skip.title }}</strong> — {{ skip.reason }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <div class="detail-actions">
+    <a href="/" class="btn btn-primary">View Recipes</a>
+    <a href="/import" class="btn btn-secondary">Import More</a>
+  </div>
+</section>
+{% endblock %}

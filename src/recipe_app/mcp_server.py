@@ -325,6 +325,14 @@ async def add_recipe_to_meal_plan(
 
 
 @mcp.tool
+async def get_meal_plan_week(plan_id: int, week_start: str, week_end: str) -> dict | None:
+    """Get a meal plan with entries filtered to a date range (YYYY-MM-DD, inclusive).
+    Useful for viewing a specific week of a meal plan."""
+    db = await get_db()
+    return await db_module.get_meal_plan_week(db, plan_id, week_start, week_end)
+
+
+@mcp.tool
 async def remove_recipe_from_meal_plan(entry_id: int) -> str:
     """Remove a recipe entry from a meal plan."""
     db = await get_db()
@@ -360,6 +368,21 @@ async def list_grocery_lists() -> list[dict]:
     """List all grocery lists with item counts."""
     db = await get_db()
     return await db_module.list_grocery_lists(db)
+
+
+@mcp.tool
+async def check_grocery_item(item_id: int, is_checked: bool) -> dict | None:
+    """Check or uncheck a grocery list item. Returns the updated item."""
+    db = await get_db()
+    return await db_module.check_grocery_item(db, item_id, is_checked)
+
+
+@mcp.tool
+async def add_grocery_item(list_id: int, text: str) -> dict:
+    """Add a manual item to a grocery list. Returns the updated list."""
+    db = await get_db()
+    await db_module.add_grocery_item(db, list_id, text)
+    return await db_module.get_grocery_list(db, list_id)
 
 
 @mcp.tool

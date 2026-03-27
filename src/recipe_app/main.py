@@ -1,5 +1,8 @@
+import asyncio
 import logging
+import time
 from datetime import date, timedelta
+from uuid import uuid4
 from pathlib import Path
 from typing import Annotated
 
@@ -17,11 +20,16 @@ from recipe_app.db import (
     toggle_favorite, set_rating,
     list_meal_plans, get_meal_plan, create_meal_plan, add_meal_plan_entry,
     remove_meal_plan_entry, delete_meal_plan,
+    get_meal_plan_week, list_recipe_titles,
     list_grocery_lists, get_grocery_list, generate_grocery_list,
     check_grocery_item, add_grocery_item, delete_grocery_list,
     list_pantry_items, add_pantry_item, delete_pantry_item,
 )
 from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
+from recipe_app.paprika_import import (
+    MAX_IMPORT_SIZE, ImportResult, ErroredRecipe,
+    parse_paprika_archive, import_paprika_recipes,
+)
 from recipe_app.photos import save_photo, delete_photo
 from recipe_app.routers import recipes, categories, search, meal_plans, pantry
 
@@ -77,6 +85,12 @@ app.mount("/photos", StaticFiles(directory=str(_photo_dir)), name="photos")
 
 # Use Jinja2Blocks for htmx fragment rendering
 templates = Jinja2Blocks(directory=str(_template_dir))
+
+# Custom Jinja2 date filters for calendar view
+templates.env.filters["weekday_short"] = lambda d: d.strftime("%a")
+templates.env.filters["day_num"] = lambda d: d.strftime("%-d")
+templates.env.filters["month_day"] = lambda d: d.strftime("%b %-d")
+templates.env.filters["isodate"] = lambda d: d.isoformat() if hasattr(d, "isoformat") else str(d)
 
 
 # --- Health endpoint ---
@@ -172,16 +186,29 @@ async def meal_plans_page(request: Request):
     return templates.TemplateResponse(request, "meal_plans.html", {"plans": plans})
 
 
+MEAL_SLOTS = ["breakfast", "lunch", "dinner", "snack"]
+
+
 @app.get("/meal-plans/{plan_id}", response_class=HTMLResponse)
-async def meal_plan_detail_page(request: Request, plan_id: int):
+async def meal_plan_detail_page(
+    request: Request,
+    plan_id: int,
+    week: str | None = None,
+    hx_request: Annotated[str | None, Header()] = None,
+):
     db = get_db(request)
-    plan = await get_meal_plan(db, plan_id)
-    if plan is None:
-        return HTMLResponse("Meal plan not found", status_code=404)
-    all_recipes = await list_recipes(db, limit=1000)
-    return templates.TemplateResponse(request, "meal_plan_detail.html", {
-        "plan": plan, "all_recipes": all_recipes,
-    })
+
+    # Parse and snap to Monday
+    if week:
+        try:
+            week_date = date.fromisoformat(week)
+        except ValueError:
+            return HTMLResponse("Invalid week parameter. Use YYYY-MM-DD format.", status_code=400)
+    else:
+        week_date = date.today()
+
+    block_name = "calendar_grid" if hx_request else None
+    return await _render_calendar_grid(request, db, plan_id, week_date, block_name=block_name)
 
 
 @app.post("/meal-plans")
@@ -200,26 +227,50 @@ async def add_recipe_to_plan_submit(
 ):
     form = await request.form()
     db = get_db(request)
+    entry_date = form.get("date", "")
+    meal_slot = form.get("meal_slot", "")
+
+    # Validate meal_slot
+    if meal_slot not in MEAL_SLOTS:
+        return HTMLResponse("Invalid meal slot", status_code=400)
+
     await add_meal_plan_entry(
         db, plan_id,
         recipe_id=int(form.get("recipe_id")),
-        date=form.get("date"),
-        meal_slot=form.get("meal_slot"),
+        date=entry_date,
+        meal_slot=meal_slot,
     )
     if hx_request:
-        plan = await get_meal_plan(db, plan_id)
-        return templates.TemplateResponse(
-            request, "meal_plan_detail.html", {"plan": plan, "all_recipes": []},
-            block_name="entries_list",
-        )
+        # Re-render the calendar grid for the week containing the added entry
+        try:
+            entry_d = date.fromisoformat(entry_date)
+        except ValueError:
+            entry_d = date.today()
+        return await _render_calendar_grid(request, db, plan_id, entry_d)
     return RedirectResponse(f"/meal-plans/{plan_id}", status_code=303)
 
 
-@app.post("/meal-plans/entries/{entry_id}/remove")
-async def remove_entry_submit(request: Request, entry_id: int):
+@app.post("/meal-plans/{plan_id}/entries/{entry_id}/remove")
+async def remove_entry_submit(
+    request: Request, plan_id: int, entry_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    form = await request.form()
     db = get_db(request)
     await remove_meal_plan_entry(db, entry_id)
+    if hx_request:
+        week_str = form.get("week_start", "")
+        try:
+            week_date = date.fromisoformat(week_str)
+        except ValueError:
+            week_date = date.today()
+        return await _render_calendar_grid(request, db, plan_id, week_date)
+    # Validate referer to prevent open redirect
+    from urllib.parse import urlparse
     referer = request.headers.get("referer", "/meal-plans")
+    parsed = urlparse(referer)
+    if parsed.netloc:  # external URL — redirect to safe default
+        referer = "/meal-plans"
     return RedirectResponse(referer, status_code=303)
 
 
@@ -228,6 +279,151 @@ async def delete_meal_plan_submit(request: Request, plan_id: int):
     db = get_db(request)
     await delete_meal_plan(db, plan_id)
     return RedirectResponse("/meal-plans", status_code=303)
+
+
+# --- Paprika Import web UI ---
+
+# Background import task storage: task_id -> (created_at, result_or_None)
+_import_tasks: dict[str, tuple[float, ImportResult | None]] = {}
+_import_task_refs: set[asyncio.Task] = set()
+_IMPORT_TASK_TTL = 3600  # 1 hour
+
+
+def _cleanup_stale_imports():
+    """Evict import tasks older than TTL."""
+    cutoff = time.time() - _IMPORT_TASK_TTL
+    stale = [k for k, (ts, _) in _import_tasks.items() if ts < cutoff]
+    for k in stale:
+        del _import_tasks[k]
+
+
+@app.get("/import", response_class=HTMLResponse)
+async def import_page(request: Request):
+    return templates.TemplateResponse(request, "import.html", {"error": None})
+
+
+@app.post("/import")
+async def import_upload(request: Request):
+
+    form = await request.form()
+    upload = form.get("file")
+    if not isinstance(upload, UploadFile) or not upload.filename:
+        return templates.TemplateResponse(request, "import.html", {
+            "error": "Please select a .paprikarecipes file.",
+        })
+
+    # Stream-read with size check
+    chunks = []
+    total = 0
+    while chunk := await upload.read(1024 * 1024):
+        total += len(chunk)
+        if total > MAX_IMPORT_SIZE:
+            return templates.TemplateResponse(request, "import.html", {
+                "error": f"File exceeds maximum size of {MAX_IMPORT_SIZE // (1024*1024)} MB.",
+            })
+        chunks.append(chunk)
+    file_bytes = b"".join(chunks)
+
+    if not file_bytes:
+        return templates.TemplateResponse(request, "import.html", {
+            "error": "Empty file uploaded.",
+        })
+
+    # Validate ZIP format
+    try:
+        paprika_recipes = await asyncio.to_thread(parse_paprika_archive, file_bytes)
+    except ValueError as exc:
+        return templates.TemplateResponse(request, "import.html", {
+            "error": str(exc),
+        })
+
+    if not paprika_recipes:
+        return templates.TemplateResponse(request, "import.html", {
+            "error": "No recipes found in archive.",
+        })
+
+    # Start background import task
+    _cleanup_stale_imports()
+    task_id = uuid4().hex
+    _import_tasks[task_id] = (time.time(), None)
+    db = get_db(request)
+
+    async def _run_import():
+        try:
+            result = await import_paprika_recipes(db, paprika_recipes)
+            _import_tasks[task_id] = (time.time(), result)
+        except Exception as exc:
+            logger.exception("Import task %s failed", task_id)
+            _import_tasks[task_id] = (time.time(), ImportResult(errors=[ErroredRecipe(
+                title="Import", error=str(exc),
+            )]))
+
+    task = asyncio.create_task(_run_import())
+    _import_task_refs.add(task)
+    task.add_done_callback(_import_task_refs.discard)
+    return RedirectResponse(f"/import/status/{task_id}", status_code=303)
+
+
+@app.get("/import/status/{task_id}", response_class=HTMLResponse)
+async def import_status(request: Request, task_id: str):
+    _cleanup_stale_imports()
+    if task_id not in _import_tasks:
+        return HTMLResponse("Import task not found", status_code=404)
+
+    ts, result = _import_tasks[task_id]
+    if result is None:
+        # Still processing
+        return templates.TemplateResponse(request, "import_progress.html", {
+            "task_id": task_id,
+        })
+
+    # Done — render results and clean up
+    del _import_tasks[task_id]
+    return templates.TemplateResponse(request, "import_results.html", {
+        "result": result,
+    })
+
+
+async def _render_calendar_grid(
+    request: Request,
+    db: "aiosqlite.Connection",
+    plan_id: int,
+    ref_date: date,
+    block_name: str | None = "calendar_grid",
+) -> HTMLResponse:
+    """Render the meal plan calendar (full page or just the grid block)."""
+    week_start = ref_date - timedelta(days=ref_date.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    plan = await get_meal_plan_week(db, plan_id, week_start.isoformat(), week_end.isoformat())
+    if plan is None:
+        return HTMLResponse("Meal plan not found", status_code=404)
+
+    # Only load recipe titles for full-page render (dropdown is outside the grid block)
+    all_recipes = await list_recipe_titles(db) if block_name is None else []
+    days = [week_start + timedelta(days=i) for i in range(7)]
+
+    entries_by_cell: dict[tuple[str, str], list[dict]] = {}
+    for entry in plan.get("entries", []):
+        key = (entry["date"], entry["meal_slot"])
+        entries_by_cell.setdefault(key, []).append(entry)
+
+    context = {
+        "plan": plan,
+        "all_recipes": all_recipes,
+        "days": days,
+        "week_start": week_start,
+        "week_end": week_end,
+        "prev_week": (week_start - timedelta(days=7)).isoformat(),
+        "next_week": (week_start + timedelta(days=7)).isoformat(),
+        "entries_by_cell": entries_by_cell,
+        "today": date.today(),
+        "meal_slots": MEAL_SLOTS,
+    }
+    return templates.TemplateResponse(
+        request, "meal_plan_detail.html", context,
+        block_name=block_name,
+    )
 
 
 # --- Grocery Lists web UI ---

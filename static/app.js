@@ -15,10 +15,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
 function initAll() {
   initImportForm();
+  initPaprikaImportForm();
   initCookingMode();
   initScaling();
   initNutritionRows();
   initQuickRate();
+  initCalendar();
 }
 
 // --- HTMX lifecycle handlers ---
@@ -31,12 +33,21 @@ function initHtmxHandlers() {
       initAll();
       return;
     }
+    // Calendar grid swap — re-init calendar
+    if (target.id === 'calendar-grid' || target.querySelector('#calendar-grid')) {
+      initCalendar();
+    }
     // Targeted swaps — only re-init affected widgets
     if (target.querySelector('#scaleButtons') || target.id === 'scaleButtons' ||
         target.classList.contains('scaling-section')) {
       initScaling();
       _restoreCookingState();
     }
+  });
+
+  // Browser back/forward with hx-push-url — re-init after history restoration
+  document.body.addEventListener('htmx:historyRestore', function () {
+    initAll();
   });
 }
 
@@ -73,6 +84,27 @@ function initImportForm() {
         btn.textContent = 'Import';
         btn.disabled = false;
       });
+  });
+}
+
+// --- Paprika Import Form (double-submit guard) ---
+function initPaprikaImportForm() {
+  var form = document.getElementById('paprikaImportForm');
+  if (!form || form._initialized) return;
+  form._initialized = true;
+
+  form.addEventListener('submit', function (e) {
+    if (form._submitting) {
+      e.preventDefault();
+      return;
+    }
+    form._submitting = true;
+    var btn = document.getElementById('paprikaImportBtn');
+    if (btn) {
+      btn.textContent = 'Importing...';
+      btn.disabled = true;
+    }
+    // Form submits normally (not fetch — it's a regular POST)
   });
 }
 
@@ -269,6 +301,38 @@ function initQuickRate() {
     if (!widget) return;
     var input = widget.querySelector('#ratingValue');
     if (input) input.value = btn.dataset.rating;
+  });
+}
+
+// --- Calendar Meal Plan ---
+// Uses event delegation on the grid element — survives HTMX swaps.
+// Flag is on the grid element itself which gets destroyed on swap,
+// so initCalendar() correctly re-initializes after each grid replacement.
+function initCalendar() {
+  var grid = document.getElementById('calendar-grid');
+  if (!grid || grid._calendarInitialized) return;
+  grid._calendarInitialized = true;
+
+  // Reset stale form fields on every grid swap
+  var form = document.getElementById('add-recipe-form');
+  if (form) {
+    var dateInput = form.querySelector('[name="date"]');
+    var slotInput = form.querySelector('[name="meal_slot"]');
+    if (dateInput) dateInput.value = '';
+    if (slotInput) slotInput.value = '';
+  }
+
+  // Event delegation: one listener on grid for all "+" buttons
+  grid.addEventListener('click', function (e) {
+    var addBtn = e.target.closest('.calendar-add-btn');
+    if (!addBtn || !form) return;
+
+    var dateInput = form.querySelector('[name="date"]');
+    var slotInput = form.querySelector('[name="meal_slot"]');
+    if (dateInput) dateInput.value = addBtn.dataset.date;
+    if (slotInput) slotInput.value = addBtn.dataset.slot;
+
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
 
