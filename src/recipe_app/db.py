@@ -164,8 +164,9 @@ async def init_schema(db: aiosqlite.Connection) -> None:
     await db.executescript(sql)
 
 
-_KNOWN_TABLES = {"recipes", "categories", "recipe_categories", "meal_plans",
-                 "meal_plan_entries", "grocery_lists", "grocery_list_items", "pantry_items"}
+_KNOWN_TABLES = {"recipes", "categories", "recipe_categories", "calendar_entries",
+                 "grocery_lists", "grocery_list_items", "pantry_items",
+                 "meal_plans", "meal_plan_entries"}  # old tables kept for pre-v4 migrations
 
 
 async def _column_exists(db: aiosqlite.Connection, table: str, column: str) -> bool:
@@ -315,6 +316,107 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         await db.execute("PRAGMA user_version = 3")
         await db.commit()
         logger.info("Migration v2 -> v3 complete")
+
+    if version < 4:
+        db_path = str(settings.database_path)
+        backup = f"{db_path}.backup-v{version}-{datetime.now():%Y%m%d%H%M%S}"
+        try:
+            await db.execute(f"VACUUM INTO '{backup}'")
+        except Exception:
+            shutil.copy2(db_path, backup)
+        logger.info("Database backed up to %s before v4 migration", backup)
+
+        # Disable FK enforcement for table recreation
+        await db.execute("PRAGMA foreign_keys = OFF")
+
+        # Step 1: Calendar — meal_plan_entries → calendar_entries
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS calendar_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+                date TEXT NOT NULL,
+                meal_slot TEXT NOT NULL CHECK(meal_slot IN ('breakfast','lunch','dinner','snack')),
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_calendar_entries_date ON calendar_entries(date)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_calendar_entries_recipe ON calendar_entries(recipe_id)")
+
+        # Copy entries (use created_at for updated_at — old table has no updated_at)
+        if await _column_exists(db, "meal_plan_entries", "recipe_id"):
+            await db.execute("""
+                INSERT INTO calendar_entries (recipe_id, date, meal_slot, created_at, updated_at)
+                    SELECT recipe_id, date, meal_slot, created_at, created_at
+                    FROM meal_plan_entries
+            """)
+
+        # Step 2: Grocery — recreate grocery_lists WITHOUT meal_plan_id FK column
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS grocery_lists_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+
+        # Check if there are existing grocery lists to consolidate
+        cursor = await db.execute("SELECT MIN(id) as min_id FROM grocery_lists")
+        row = await cursor.fetchone()
+        min_id = row["min_id"] if row and row["min_id"] is not None else None
+
+        if min_id is not None:
+            # Re-point all items to the lowest-id list
+            await db.execute(
+                "UPDATE grocery_list_items SET grocery_list_id = ? WHERE grocery_list_id != ?",
+                (min_id, min_id),
+            )
+            # Copy the surviving list, renamed
+            await db.execute("""
+                INSERT INTO grocery_lists_new (id, name, created_at, updated_at)
+                    SELECT id, 'Grocery List', created_at, updated_at
+                    FROM grocery_lists WHERE id = ?
+            """, (min_id,))
+        else:
+            # No existing lists — create a default one
+            await db.execute(
+                "INSERT INTO grocery_lists_new (id, name) VALUES (1, 'Grocery List')"
+            )
+
+        await db.execute("DROP TABLE IF EXISTS grocery_lists")
+        await db.execute("ALTER TABLE grocery_lists_new RENAME TO grocery_lists")
+
+        # Recreate grocery_lists trigger (DROP TABLE destroyed it)
+        await db.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_grocery_lists_updated
+            AFTER UPDATE ON grocery_lists FOR EACH ROW BEGIN
+                UPDATE grocery_lists SET updated_at = datetime('now') WHERE id = NEW.id;
+            END
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_grocery_list_items_list ON grocery_list_items(grocery_list_id)"
+        )
+
+        # Step 3: Drop old tables (child first, then parent)
+        await db.execute("DROP TABLE IF EXISTS meal_plan_entries")
+        await db.execute("DROP TABLE IF EXISTS meal_plans")
+
+        # Step 4: Create calendar update trigger
+        await db.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_calendar_entries_updated
+            AFTER UPDATE ON calendar_entries FOR EACH ROW BEGIN
+                UPDATE calendar_entries SET updated_at = datetime('now') WHERE id = NEW.id;
+            END
+        """)
+
+        # Step 5: Re-enable FK enforcement and verify integrity
+        await db.execute("PRAGMA foreign_key_check")
+        await db.execute("PRAGMA foreign_keys = ON")
+
+        await db.execute("PRAGMA user_version = 4")
+        await db.commit()
+        logger.info("Migration v3 -> v4 complete (calendar + single grocery list)")
 
 
 @asynccontextmanager
