@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date, timedelta
 from pathlib import Path
@@ -303,6 +304,100 @@ async def delete_meal_plan_submit(request: Request, plan_id: int):
     db = get_db(request)
     await delete_meal_plan(db, plan_id)
     return RedirectResponse("/meal-plans", status_code=303)
+
+
+# --- Paprika Import web UI ---
+
+# Background import task storage: task_id -> ImportResult or None (in-progress)
+_import_tasks: dict[str, object] = {}
+
+
+@app.get("/import", response_class=HTMLResponse)
+async def import_page(request: Request):
+    return templates.TemplateResponse(request, "import.html", {"error": None})
+
+
+@app.post("/import")
+async def import_upload(request: Request):
+    from uuid import uuid4
+    from recipe_app.paprika_import import (
+        MAX_IMPORT_SIZE, parse_paprika_archive, import_paprika_recipes,
+    )
+
+    form = await request.form()
+    upload = form.get("file")
+    if not isinstance(upload, UploadFile) or not upload.filename:
+        return templates.TemplateResponse(request, "import.html", {
+            "error": "Please select a .paprikarecipes file.",
+        })
+
+    # Stream-read with size check
+    chunks = []
+    total = 0
+    while chunk := await upload.read(1024 * 1024):
+        total += len(chunk)
+        if total > MAX_IMPORT_SIZE:
+            return templates.TemplateResponse(request, "import.html", {
+                "error": f"File exceeds maximum size of {MAX_IMPORT_SIZE // (1024*1024)} MB.",
+            })
+        chunks.append(chunk)
+    file_bytes = b"".join(chunks)
+
+    if not file_bytes:
+        return templates.TemplateResponse(request, "import.html", {
+            "error": "Empty file uploaded.",
+        })
+
+    # Validate ZIP format
+    try:
+        paprika_recipes = await asyncio.to_thread(parse_paprika_archive, file_bytes)
+    except ValueError as exc:
+        return templates.TemplateResponse(request, "import.html", {
+            "error": str(exc),
+        })
+
+    if not paprika_recipes:
+        return templates.TemplateResponse(request, "import.html", {
+            "error": "No recipes found in archive.",
+        })
+
+    # Start background import task
+    task_id = uuid4().hex
+    _import_tasks[task_id] = None  # in-progress sentinel
+    db = get_db(request)
+
+    async def _run_import():
+        try:
+            result = await import_paprika_recipes(db, paprika_recipes)
+            _import_tasks[task_id] = result
+        except Exception as exc:
+            logger.exception("Import task %s failed", task_id)
+            from recipe_app.paprika_import import ImportResult, ErroredRecipe
+            _import_tasks[task_id] = ImportResult(errors=[ErroredRecipe(
+                title="Import", error=str(exc),
+            )])
+
+    asyncio.create_task(_run_import())
+    return RedirectResponse(f"/import/status/{task_id}", status_code=303)
+
+
+@app.get("/import/status/{task_id}", response_class=HTMLResponse)
+async def import_status(request: Request, task_id: str):
+    if task_id not in _import_tasks:
+        return HTMLResponse("Import task not found", status_code=404)
+
+    result = _import_tasks[task_id]
+    if result is None:
+        # Still processing
+        return templates.TemplateResponse(request, "import_progress.html", {
+            "task_id": task_id,
+        })
+
+    # Done — render results and clean up
+    del _import_tasks[task_id]
+    return templates.TemplateResponse(request, "import_results.html", {
+        "result": result,
+    })
 
 
 async def _render_calendar_grid(request: Request, db, plan_id: int, ref_date: date):

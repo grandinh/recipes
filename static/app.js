@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 function initAll() {
   initImportForm();
+  initPaprikaImportForm();
   initCookingMode();
   initScaling();
   initNutritionRows();
@@ -83,6 +84,27 @@ function initImportForm() {
         btn.textContent = 'Import';
         btn.disabled = false;
       });
+  });
+}
+
+// --- Paprika Import Form (double-submit guard) ---
+function initPaprikaImportForm() {
+  var form = document.getElementById('paprikaImportForm');
+  if (!form || form._initialized) return;
+  form._initialized = true;
+
+  form.addEventListener('submit', function (e) {
+    if (form._submitting) {
+      e.preventDefault();
+      return;
+    }
+    form._submitting = true;
+    var btn = document.getElementById('paprikaImportBtn');
+    if (btn) {
+      btn.textContent = 'Importing...';
+      btn.disabled = true;
+    }
+    // Form submits normally (not fetch — it's a regular POST)
   });
 }
 

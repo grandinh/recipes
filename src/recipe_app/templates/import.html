@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Import from Paprika — Recipe Manager{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1>Import from Paprika 3</h1>
+</section>
+
+<section class="import-page">
+  <p>Upload your <code>.paprikarecipes</code> export file to import your recipe library.</p>
+  <p class="hint">Maximum file size: 50 MB. Large imports may take several minutes.</p>
+
+  {% if error %}
+    <div class="import-error" style="background: #fde8e8; padding: 0.75rem 1rem; border-radius: 8px; margin: 1rem 0; color: #b5382a;">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  <form method="post" action="/import" enctype="multipart/form-data" id="paprikaImportForm" style="margin-top: 1rem;">
+    <div class="form-group">
+      <label for="paprika_file">Paprika Export File</label>
+      <input type="file" name="file" id="paprika_file" accept=".paprikarecipes" class="input" required>
+    </div>
+    <button type="submit" class="btn btn-primary btn-large" id="paprikaImportBtn">Import Recipes</button>
+  </form>
+</section>
+{% endblock %}
