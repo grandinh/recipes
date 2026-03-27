@@ -39,11 +39,10 @@ async def test_pantry_delete_htmx(client, create_pantry_item):
     assert "To Remove" not in resp.text
 
 
-async def test_meal_plan_add_recipe_htmx(client, create_recipe, create_meal_plan):
+async def test_calendar_add_recipe_htmx(client, create_recipe):
     recipe = await create_recipe()
-    plan = await create_meal_plan()
     resp = await client.post(
-        f"/meal-plans/{plan['id']}/add-recipe",
+        "/calendar/add-recipe",
         data={
             "recipe_id": str(recipe["id"]),
             "date": "2026-03-25",

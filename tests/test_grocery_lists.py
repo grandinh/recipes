@@ -13,11 +13,10 @@ async def test_generate_from_recipe_ids(client, create_recipe):
     assert len(data["items"]) > 0
 
 
-async def test_generate_from_meal_plan(client, create_recipe, create_meal_plan):
+async def test_generate_from_calendar(client, create_recipe):
     recipe = await create_recipe()
-    plan = await create_meal_plan()
     await client.post(
-        f"/api/meal-plans/{plan['id']}/entries",
+        "/api/calendar/entries",
         json={
             "recipe_id": recipe["id"],
             "date": "2026-03-25",
@@ -26,11 +25,10 @@ async def test_generate_from_meal_plan(client, create_recipe, create_meal_plan):
     )
     resp = await client.post(
         "/api/grocery-lists/generate",
-        json={"meal_plan_id": plan["id"]},
+        json={"date_start": "2026-03-23", "date_end": "2026-03-29"},
     )
     assert resp.status_code == 201
     data = resp.json()
-    assert data["meal_plan_id"] == plan["id"]
     assert len(data["items"]) > 0
 
 

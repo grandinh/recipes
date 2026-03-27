@@ -1,31 +1,31 @@
 {% extends "base.html" %}
 
-{% block title %}{{ plan.name }} — Recipe Manager{% endblock %}
+{% block title %}Calendar — Recipe Manager{% endblock %}
 
 {% block content %}
 <section class="page-header">
-  <h1>{{ plan.name }}</h1>
+  <h1>Calendar</h1>
   <div class="detail-actions">
-    <a href="/meal-plans" class="btn btn-secondary">Back to Plans</a>
     <a href="/grocery-lists" class="btn btn-secondary">Grocery Lists</a>
   </div>
 </section>
 
-{# Generate grocery list from this plan #}
+{# Generate grocery list from this week #}
 <section class="generate-grocery">
   <form method="post" action="/grocery-lists/generate" class="inline-create-form">
-    <input type="hidden" name="meal_plan_id" value="{{ plan.id }}">
-    <input type="text" name="name" placeholder="Grocery list name..." value="{{ plan.name }} Shopping List" class="input" style="flex: 1;">
-    <button type="submit" class="btn btn-primary">Generate Grocery List</button>
+    <input type="hidden" name="date_start" value="{{ week_start|isodate }}">
+    <input type="hidden" name="date_end" value="{{ week_end|isodate }}">
+    <input type="text" name="name" placeholder="Grocery list name..." value="Week of {{ week_start|month_day }} Shopping List" class="input" style="flex: 1;">
+    <button type="submit" class="btn btn-primary">Add This Week to Grocery List</button>
   </form>
 </section>
 
 {# Add recipe form (shared — populated by "+" buttons via JS) #}
 <section class="add-entry-section" id="add-recipe-section">
   <h2>Add Recipe</h2>
-  <form method="post" action="/meal-plans/{{ plan.id }}/add-recipe"
+  <form method="post" action="/calendar/add-recipe"
         id="add-recipe-form"
-        hx-post="/meal-plans/{{ plan.id }}/add-recipe"
+        hx-post="/calendar/add-recipe"
         hx-target="#calendar-grid"
         hx-swap="innerHTML">
     <div class="form-row">
@@ -60,20 +60,20 @@
   {# Week navigation #}
   <div class="calendar-nav">
     <button class="btn btn-secondary btn-small"
-            hx-get="/meal-plans/{{ plan.id }}?week={{ prev_week }}"
+            hx-get="/calendar?week={{ prev_week }}"
             hx-target="#calendar-grid"
             hx-swap="innerHTML"
-            hx-push-url="/meal-plans/{{ plan.id }}?week={{ prev_week }}">
+            hx-headers='{"HX-Push-Url": "/calendar?week={{ prev_week }}"}'>
       &larr; Prev
     </button>
     <span class="calendar-nav-title">
       {{ week_start|month_day }} &ndash; {{ week_end|month_day }}, {{ week_start.year }}
     </span>
     <button class="btn btn-secondary btn-small"
-            hx-get="/meal-plans/{{ plan.id }}?week={{ next_week }}"
+            hx-get="/calendar?week={{ next_week }}"
             hx-target="#calendar-grid"
             hx-swap="innerHTML"
-            hx-push-url="/meal-plans/{{ plan.id }}?week={{ next_week }}">
+            hx-headers='{"HX-Push-Url": "/calendar?week={{ next_week }}"}'>
       Next &rarr;
     </button>
   </div>
@@ -99,8 +99,8 @@
             <div class="calendar-entry">
               <a href="/recipe/{{ entry.recipe_id }}" class="calendar-entry-title">{{ entry.recipe_title }}</a>
               <form method="post"
-                    action="/meal-plans/{{ plan.id }}/entries/{{ entry.id }}/remove"
-                    hx-post="/meal-plans/{{ plan.id }}/entries/{{ entry.id }}/remove"
+                    action="/calendar/entries/{{ entry.id }}/remove"
+                    hx-post="/calendar/entries/{{ entry.id }}/remove"
                     hx-target="#calendar-grid"
                     hx-swap="innerHTML"
                     class="inline-form">
@@ -133,8 +133,8 @@
                 <div class="calendar-entry">
                   <a href="/recipe/{{ entry.recipe_id }}" class="calendar-entry-title">{{ entry.recipe_title }}</a>
                   <form method="post"
-                        action="/meal-plans/{{ plan.id }}/entries/{{ entry.id }}/remove"
-                        hx-post="/meal-plans/{{ plan.id }}/entries/{{ entry.id }}/remove"
+                        action="/calendar/entries/{{ entry.id }}/remove"
+                        hx-post="/calendar/entries/{{ entry.id }}/remove"
                         hx-target="#calendar-grid"
                         hx-swap="innerHTML"
                         class="inline-form">
@@ -148,13 +148,13 @@
         {% endfor %}
         <button type="button" class="calendar-add-btn calendar-add-btn-mobile"
                 data-date="{{ day|isodate }}"
-                data-slot="dinner"
+                data-slot=""
                 title="Add recipe">+ Add recipe</button>
       </div>
     {% endfor %}
   </div>
 
-  {% if not plan.entries %}
+  {% if not has_entries %}
     <div class="empty-state" style="padding: 1rem;">
       <p>No recipes planned for this week. Click <strong>+</strong> in a cell to add one.</p>
     </div>

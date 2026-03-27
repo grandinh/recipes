@@ -18,22 +18,21 @@ async def test_aggregation_sums_quantities(client, create_recipe):
     assert "5" in egg_items[0]["text"]
 
 
-async def test_multiplicity_from_meal_plan(client, create_recipe, create_meal_plan):
+async def test_multiplicity_from_calendar(client, create_recipe):
     """Same recipe on two days = double quantities."""
     recipe = await create_recipe(ingredients=["2 eggs"])
-    plan = await create_meal_plan()
     # Add same recipe twice (different days)
     await client.post(
-        f"/api/meal-plans/{plan['id']}/entries",
+        "/api/calendar/entries",
         json={"recipe_id": recipe["id"], "date": "2026-03-25", "meal_slot": "dinner"},
     )
     await client.post(
-        f"/api/meal-plans/{plan['id']}/entries",
+        "/api/calendar/entries",
         json={"recipe_id": recipe["id"], "date": "2026-03-26", "meal_slot": "dinner"},
     )
     resp = await client.post(
         "/api/grocery-lists/generate",
-        json={"meal_plan_id": plan["id"]},
+        json={"date_start": "2026-03-23", "date_end": "2026-03-29"},
     )
     assert resp.status_code == 201
     items = resp.json()["items"]
@@ -65,12 +64,11 @@ async def test_add_recipe_to_grocery_list(client, create_recipe):
     assert "/grocery-lists/" in location
 
 
-async def test_empty_meal_plan_creates_empty_list(client, create_meal_plan):
-    """Empty meal plan should create an empty grocery list, not error."""
-    plan = await create_meal_plan()
+async def test_empty_calendar_creates_empty_list(client):
+    """Empty calendar date range should create an empty grocery list, not error."""
     resp = await client.post(
         "/api/grocery-lists/generate",
-        json={"meal_plan_id": plan["id"]},
+        json={"date_start": "2099-01-01", "date_end": "2099-01-07"},
     )
     assert resp.status_code == 201
     assert resp.json()["items"] == []
@@ -123,24 +121,22 @@ async def test_csp_no_inline_handlers(client, create_recipe):
     assert "onchange=" not in resp.text
 
 
-async def test_grocery_date_range_filter(client, create_recipe, create_meal_plan):
+async def test_grocery_date_range_filter(client, create_recipe):
     """Date range filter should only include meals within the range."""
     recipe = await create_recipe(ingredients=["2 eggs"])
-    plan = await create_meal_plan()
     # Add entries on different dates
     await client.post(
-        f"/api/meal-plans/{plan['id']}/entries",
+        "/api/calendar/entries",
         json={"recipe_id": recipe["id"], "date": "2026-03-25", "meal_slot": "dinner"},
     )
     await client.post(
-        f"/api/meal-plans/{plan['id']}/entries",
+        "/api/calendar/entries",
         json={"recipe_id": recipe["id"], "date": "2026-03-28", "meal_slot": "dinner"},
     )
     # Generate with date range excluding second entry
     resp = await client.post(
         "/api/grocery-lists/generate",
         json={
-            "meal_plan_id": plan["id"],
             "date_start": "2026-03-25",
             "date_end": "2026-03-26",
         },

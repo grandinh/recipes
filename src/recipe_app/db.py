@@ -834,138 +834,116 @@ async def delete_category(db: aiosqlite.Connection, category_id: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# CRUD — Meal Plans
+# CRUD — Calendar Entries
 # ---------------------------------------------------------------------------
 
-async def create_meal_plan(db: aiosqlite.Connection, name: str) -> dict:
-    async with _write_lock:
-        cursor = await db.execute(
-            "INSERT INTO meal_plans (name) VALUES (?)", (name,)
-        )
-        await db.commit()
-    plan_id = cursor.lastrowid
-    return await get_meal_plan(db, plan_id)
-
-
-async def get_meal_plan(db: aiosqlite.Connection, plan_id: int) -> dict | None:
-    cursor = await db.execute("SELECT * FROM meal_plans WHERE id = ?", (plan_id,))
-    plan = await cursor.fetchone()
-    if plan is None:
-        return None
-
-    cursor = await db.execute(
-        """
-        SELECT e.*, r.title as recipe_title, r.image_url as recipe_image_url
-          FROM meal_plan_entries e
-          JOIN recipes r ON r.id = e.recipe_id
-         WHERE e.meal_plan_id = ?
-         ORDER BY e.date, e.meal_slot
-        """,
-        (plan_id,),
-    )
-    entries = await cursor.fetchall()
-    return {**plan, "entries": entries}
-
-
-async def list_meal_plans(db: aiosqlite.Connection) -> list[dict]:
-    cursor = await db.execute(
-        """
-        SELECT mp.*, COUNT(e.id) as entry_count
-          FROM meal_plans mp
-          LEFT JOIN meal_plan_entries e ON e.meal_plan_id = mp.id
-         GROUP BY mp.id
-         ORDER BY mp.created_at DESC
-        """
-    )
-    return await cursor.fetchall()
-
-
-async def update_meal_plan(db: aiosqlite.Connection, plan_id: int, name: str) -> dict | None:
-    async with _write_lock:
-        cursor = await db.execute(
-            "UPDATE meal_plans SET name = ? WHERE id = ?", (name, plan_id)
-        )
-        await db.commit()
-    if cursor.rowcount == 0:
-        return None
-    return await get_meal_plan(db, plan_id)
-
-
-async def delete_meal_plan(db: aiosqlite.Connection, plan_id: int) -> bool:
-    async with _write_lock:
-        cursor = await db.execute("DELETE FROM meal_plans WHERE id = ?", (plan_id,))
-        await db.commit()
-    return cursor.rowcount > 0
-
-
-async def add_meal_plan_entry(
+async def add_calendar_entry(
     db: aiosqlite.Connection,
-    plan_id: int,
     recipe_id: int,
     date: str,
     meal_slot: str,
-    servings_override: int | None = None,
 ) -> dict:
+    """Insert a calendar entry and return it with the joined recipe title."""
     async with _write_lock:
         cursor = await db.execute(
             """
-            INSERT INTO meal_plan_entries (meal_plan_id, recipe_id, date, meal_slot, servings_override)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO calendar_entries (recipe_id, date, meal_slot)
+            VALUES (?, ?, ?)
             """,
-            (plan_id, recipe_id, date, meal_slot, servings_override),
+            (recipe_id, date, meal_slot),
         )
         await db.commit()
     entry_id = cursor.lastrowid
     cursor = await db.execute(
         """
-        SELECT e.*, r.title as recipe_title, r.image_url as recipe_image_url
-          FROM meal_plan_entries e
-          JOIN recipes r ON r.id = e.recipe_id
-         WHERE e.id = ?
+        SELECT ce.*, r.title AS recipe_title, r.image_url AS recipe_image_url
+          FROM calendar_entries ce
+          JOIN recipes r ON r.id = ce.recipe_id
+         WHERE ce.id = ?
         """,
         (entry_id,),
     )
     return await cursor.fetchone()
 
 
-async def get_meal_plan_week(
+async def get_calendar_week(
     db: aiosqlite.Connection,
-    plan_id: int,
     week_start: str,
     week_end: str,
-) -> dict | None:
-    """Get a meal plan with entries filtered to a date range (inclusive)."""
-    cursor = await db.execute("SELECT * FROM meal_plans WHERE id = ?", (plan_id,))
-    plan = await cursor.fetchone()
-    if plan is None:
-        return None
-
+) -> dict:
+    """Return calendar entries within a date range (inclusive), with recipe data."""
     cursor = await db.execute(
         """
-        SELECT e.*, r.title as recipe_title, r.image_url as recipe_image_url
-          FROM meal_plan_entries e
-          JOIN recipes r ON r.id = e.recipe_id
-         WHERE e.meal_plan_id = ?
-           AND e.date BETWEEN ? AND ?
-         ORDER BY e.date, e.meal_slot
+        SELECT ce.*, r.title AS recipe_title, r.image_url AS recipe_image_url
+          FROM calendar_entries ce
+          JOIN recipes r ON r.id = ce.recipe_id
+         WHERE ce.date BETWEEN ? AND ?
+         ORDER BY ce.date, ce.meal_slot
         """,
-        (plan_id, week_start, week_end),
+        (week_start, week_end),
     )
     entries = await cursor.fetchall()
-    return {**plan, "entries": entries}
+    return {"entries": entries}
+
+
+async def remove_calendar_entry(db: aiosqlite.Connection, entry_id: int) -> bool:
+    """Delete a calendar entry. Returns True if a row was deleted."""
+    async with _write_lock:
+        cursor = await db.execute(
+            "DELETE FROM calendar_entries WHERE id = ?", (entry_id,)
+        )
+        await db.commit()
+    return cursor.rowcount > 0
+
+
+async def add_calendar_entries_batch(
+    db: aiosqlite.Connection,
+    entries: list[dict],
+) -> list[dict]:
+    """Batch-insert calendar entries in a single transaction.
+
+    Each entry dict must have: recipe_id, date, meal_slot.
+    Returns the list of created entries with recipe data.
+    """
+    created_ids: list[int] = []
+    async with _write_lock:
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            for entry in entries:
+                cursor = await db.execute(
+                    """
+                    INSERT INTO calendar_entries (recipe_id, date, meal_slot)
+                    VALUES (?, ?, ?)
+                    """,
+                    (entry["recipe_id"], entry["date"], entry["meal_slot"]),
+                )
+                created_ids.append(cursor.lastrowid)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    if not created_ids:
+        return []
+
+    placeholders = ",".join("?" for _ in created_ids)
+    cursor = await db.execute(
+        f"""
+        SELECT ce.*, r.title AS recipe_title, r.image_url AS recipe_image_url
+          FROM calendar_entries ce
+          JOIN recipes r ON r.id = ce.recipe_id
+         WHERE ce.id IN ({placeholders})
+         ORDER BY ce.date, ce.meal_slot
+        """,
+        created_ids,
+    )
+    return await cursor.fetchall()
 
 
 async def list_recipe_titles(db: aiosqlite.Connection) -> list[dict]:
     """Lightweight recipe list returning only id and title for pickers."""
     cursor = await db.execute("SELECT id, title FROM recipes ORDER BY title")
     return await cursor.fetchall()
-
-
-async def remove_meal_plan_entry(db: aiosqlite.Connection, entry_id: int) -> bool:
-    async with _write_lock:
-        cursor = await db.execute("DELETE FROM meal_plan_entries WHERE id = ?", (entry_id,))
-        await db.commit()
-    return cursor.rowcount > 0
 
 
 # ---------------------------------------------------------------------------
@@ -979,7 +957,6 @@ async def _save_grocery_list(
     db: aiosqlite.Connection,
     name: str,
     aggregated: list[dict],
-    meal_plan_id: int | None = None,
 ) -> int:
     """Persist a grocery list and its items inside a transaction.
 
@@ -989,8 +966,8 @@ async def _save_grocery_list(
         try:
             await db.execute("BEGIN IMMEDIATE")
             cursor = await db.execute(
-                "INSERT INTO grocery_lists (name, meal_plan_id) VALUES (?, ?)",
-                (name, meal_plan_id),
+                "INSERT INTO grocery_lists (name) VALUES (?)",
+                (name,),
             )
             list_id = cursor.lastrowid
             for item in aggregated:
@@ -1017,12 +994,11 @@ async def _save_grocery_list(
 async def generate_grocery_list(
     db: aiosqlite.Connection,
     name: str | None = None,
-    meal_plan_id: int | None = None,
     recipe_ids: list[int] | None = None,
     date_start: str | None = None,
     date_end: str | None = None,
 ) -> dict:
-    """Generate a grocery list from a meal plan or list of recipe IDs.
+    """Generate a grocery list from calendar entries or a list of recipe IDs.
 
     Parses ingredients, normalizes, assigns aisles, and aggregates
     using Fraction arithmetic.  CPU-bound work runs via asyncio.to_thread().
@@ -1030,23 +1006,16 @@ async def generate_grocery_list(
     # 1. Fetch ingredient data (async, on event loop)
     raw_ingredients: list[tuple[str, int, int | None, int | None]] = []
 
-    if meal_plan_id:
-        # Use JOIN to preserve duplicates (same recipe on multiple days)
-        date_filter = ""
-        params: list = [meal_plan_id]
-        if date_start and date_end:
-            date_filter = " AND e.date BETWEEN ? AND ?"
-            params.extend([date_start, date_end])
-
+    if date_start and date_end:
+        # Use calendar_entries filtered by date range
         cursor = await db.execute(
-            f"""
-            SELECT r.id as recipe_id, r.ingredients, r.base_servings,
-                   e.servings_override
-              FROM meal_plan_entries e
-              JOIN recipes r ON r.id = e.recipe_id
-             WHERE e.meal_plan_id = ?{date_filter}
+            """
+            SELECT r.id as recipe_id, r.ingredients, r.base_servings
+              FROM calendar_entries ce
+              JOIN recipes r ON r.id = ce.recipe_id
+             WHERE ce.date BETWEEN ? AND ?
             """,
-            params,
+            (date_start, date_end),
         )
         rows = await cursor.fetchall()
         for row in rows:
@@ -1056,7 +1025,7 @@ async def generate_grocery_list(
                     raw_ingredients.append((
                         ing,
                         row["recipe_id"],
-                        row["servings_override"],
+                        None,
                         row["base_servings"],
                     ))
     elif recipe_ids:
@@ -1076,7 +1045,7 @@ async def generate_grocery_list(
 
     # 3. DB writes (async, inside write lock + explicit transaction)
     list_name = sanitize_field(name) if name else "Shopping List"
-    list_id = await _save_grocery_list(db, list_name, aggregated, meal_plan_id=meal_plan_id)
+    list_id = await _save_grocery_list(db, list_name, aggregated)
     return await get_grocery_list(db, list_id)
 
 

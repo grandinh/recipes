@@ -1,4 +1,4 @@
-"""Pydantic models for meal plans and grocery lists."""
+"""Pydantic models for calendar entries and grocery lists."""
 
 from datetime import date
 from typing import Literal
@@ -6,31 +6,23 @@ from typing import Literal
 from pydantic import BaseModel, model_validator
 
 
-class MealPlanCreate(BaseModel):
-    """POST payload for creating a meal plan."""
-
-    name: str
-
-
-class MealPlanUpdate(BaseModel):
-    """PATCH payload for updating a meal plan."""
-
-    name: str | None = None
-
-
-class MealPlanEntryCreate(BaseModel):
-    """POST payload for adding a recipe to a meal plan."""
+class CalendarEntryCreate(BaseModel):
+    """POST payload for adding a recipe to the calendar."""
 
     recipe_id: int
     date: str
     meal_slot: Literal["breakfast", "lunch", "dinner", "snack"]
-    servings_override: int | None = None
+
+
+class CalendarEntryBatchCreate(BaseModel):
+    """POST payload for batch-adding recipes to the calendar."""
+
+    entries: list[CalendarEntryCreate]
 
 
 class GroceryListGenerate(BaseModel):
     """POST payload for generating a grocery list."""
 
-    meal_plan_id: int | None = None
     recipe_ids: list[int] | None = None
     name: str | None = None
     date_start: date | None = None
