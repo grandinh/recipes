@@ -549,13 +549,6 @@ function initNutritionRows() {
 // Timer Detection (client-side — security requirement)
 // ---------------------------------------------------------------------------
 
-var _TIMER_PATTERNS = [
-  // "for X minutes/hours"
-  /\bfor\s+(\d+)\s*(minutes?|mins?|hours?|hrs?)\b/gi,
-  // "N hour(s) N minute(s)" / "NhNm"
-  /\b(\d+)\s*(?:hours?|hrs?)\s*(?:and\s*)?(\d+)\s*(?:minutes?|mins?)\b/gi,
-  /\b(\d+)h\s*(\d+)m\b/gi,
-];
 
 function initTimerTriggers() {
   var steps = document.querySelectorAll('.direction-step');
@@ -778,42 +771,8 @@ function _renderTimerPanel() {
   if (!listEl) return;
 
   var now = Date.now();
-  var html = '';
-  for (var i = 0; i < _timers.length; i++) {
-    var t = _timers[i];
-    var remaining = Math.max(0, Math.ceil((t.endTime - now) / 1000));
-    var timeStr = t.fired ? 'DONE' : _formatSeconds(remaining);
-    var expiredClass = t.fired ? ' expired' : '';
 
-    var entry = document.createElement('div');
-    entry.className = 'timer-entry';
-
-    var info = document.createElement('div');
-    info.className = 'timer-entry-info';
-
-    var label = document.createElement('span');
-    label.className = 'timer-entry-label';
-    label.textContent = t.name;
-
-    var time = document.createElement('span');
-    time.className = 'timer-entry-time' + expiredClass;
-    time.textContent = timeStr;
-
-    info.appendChild(label);
-    info.appendChild(time);
-
-    var dismiss = document.createElement('button');
-    dismiss.className = 'timer-dismiss-btn';
-    dismiss.dataset.timerId = t.id;
-    dismiss.textContent = '\u00D7';
-    dismiss.setAttribute('aria-label', 'Dismiss timer');
-
-    entry.appendChild(info);
-    entry.appendChild(dismiss);
-    listEl.appendChild(entry);
-  }
-
-  // Replace list content (clear old entries)
+  // Clear and rebuild list content
   while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
   for (var j = 0; j < _timers.length; j++) {
     var t2 = _timers[j];

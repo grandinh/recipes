@@ -55,16 +55,3 @@ class GroceryItemUpdate(BaseModel):
     """PATCH payload for toggling a grocery item's checked state."""
 
     is_checked: bool
-
-
-class GroceryItemResponse(BaseModel):
-    """Response model for a grocery list item."""
-
-    id: int
-    grocery_list_id: int
-    text: str
-    is_checked: bool
-    sort_order: int
-    aisle: str = "Other"
-    recipe_id: int | None = None
-    normalized_name: str | None = None

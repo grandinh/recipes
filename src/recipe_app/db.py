@@ -970,6 +970,45 @@ def _aggregate_ingredients(
     return items
 
 
+async def _save_grocery_list(
+    db: aiosqlite.Connection,
+    name: str,
+    aggregated: list[dict],
+    meal_plan_id: int | None = None,
+) -> int:
+    """Persist a grocery list and its items inside a transaction.
+
+    Returns the new list ID.
+    """
+    async with _write_lock:
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "INSERT INTO grocery_lists (name, meal_plan_id) VALUES (?, ?)",
+                (name, meal_plan_id),
+            )
+            list_id = cursor.lastrowid
+            for item in aggregated:
+                await db.execute(
+                    """INSERT INTO grocery_list_items
+                       (grocery_list_id, text, sort_order, aisle, recipe_id, normalized_name)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        list_id,
+                        sanitize_field(item["text"]),
+                        item["sort_order"],
+                        sanitize_field(item["aisle"]),
+                        item["recipe_id"],
+                        sanitize_field(item["normalized_name"]) if item["normalized_name"] else None,
+                    ),
+                )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+    return list_id
+
+
 async def generate_grocery_list(
     db: aiosqlite.Connection,
     name: str | None = None,
@@ -1016,13 +1055,13 @@ async def generate_grocery_list(
                         row["base_servings"],
                     ))
     elif recipe_ids:
-        for rid in recipe_ids:
-            cursor = await db.execute(
-                "SELECT id, ingredients, base_servings FROM recipes WHERE id = ?",
-                (rid,),
-            )
-            row = await cursor.fetchone()
-            if row and row["ingredients"]:
+        placeholders = ",".join("?" for _ in recipe_ids)
+        cursor = await db.execute(
+            f"SELECT id, ingredients, base_servings FROM recipes WHERE id IN ({placeholders})",
+            recipe_ids,
+        )
+        for row in await cursor.fetchall():
+            if row["ingredients"]:
                 ingredients_list = json.loads(row["ingredients"])
                 for ing in ingredients_list:
                     raw_ingredients.append((ing, row["id"], None, row["base_servings"]))
@@ -1032,34 +1071,7 @@ async def generate_grocery_list(
 
     # 3. DB writes (async, inside write lock + explicit transaction)
     list_name = sanitize_field(name) if name else "Shopping List"
-
-    async with _write_lock:
-        try:
-            await db.execute("BEGIN IMMEDIATE")
-            cursor = await db.execute(
-                "INSERT INTO grocery_lists (name, meal_plan_id) VALUES (?, ?)",
-                (list_name, meal_plan_id),
-            )
-            list_id = cursor.lastrowid
-            for item in aggregated:
-                await db.execute(
-                    """INSERT INTO grocery_list_items
-                       (grocery_list_id, text, sort_order, aisle, recipe_id, normalized_name)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        list_id,
-                        sanitize_field(item["text"]),
-                        item["sort_order"],
-                        sanitize_field(item["aisle"]),
-                        item["recipe_id"],
-                        sanitize_field(item["normalized_name"]) if item["normalized_name"] else None,
-                    ),
-                )
-            await db.commit()
-        except Exception:
-            await db.rollback()
-            raise
-
+    list_id = await _save_grocery_list(db, list_name, aggregated, meal_plan_id=meal_plan_id)
     return await get_grocery_list(db, list_id)
 
 
@@ -1155,34 +1167,7 @@ async def add_recipe_to_grocery_list(
     ]
 
     aggregated = await asyncio.to_thread(_aggregate_ingredients, raw_ingredients)
-
-    async with _write_lock:
-        try:
-            await db.execute("BEGIN IMMEDIATE")
-            cursor = await db.execute(
-                "INSERT INTO grocery_lists (name) VALUES (?)",
-                (sanitize_field(name),),
-            )
-            list_id = cursor.lastrowid
-            for item in aggregated:
-                await db.execute(
-                    """INSERT INTO grocery_list_items
-                       (grocery_list_id, text, sort_order, aisle, recipe_id, normalized_name)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        list_id,
-                        sanitize_field(item["text"]),
-                        item["sort_order"],
-                        sanitize_field(item["aisle"]),
-                        item["recipe_id"],
-                        sanitize_field(item["normalized_name"]) if item["normalized_name"] else None,
-                    ),
-                )
-            await db.commit()
-        except Exception:
-            await db.rollback()
-            raise
-
+    list_id = await _save_grocery_list(db, sanitize_field(name), aggregated)
     return await get_grocery_list(db, list_id)
 
 

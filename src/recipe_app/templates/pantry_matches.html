@@ -19,7 +19,7 @@
   <section class="filter-row">
     <form method="get" action="/pantry/what-can-i-make" class="inline-create-form">
       <label>Max missing ingredients:</label>
-      <select name="max_missing" class="input" style="width: auto;" class="auto-submit-select">
+      <select name="max_missing" class="input auto-submit-select" style="width: auto;">
         {% for n in [0, 1, 2, 3, 5] %}
           <option value="{{ n }}" {% if max_missing == n %}selected{% endif %}>{{ n }}</option>
         {% endfor %}

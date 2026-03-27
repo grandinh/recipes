@@ -132,4 +132,4 @@ CREATE INDEX IF NOT EXISTS idx_grocery_list_items_list ON grocery_list_items(gro
 CREATE INDEX IF NOT EXISTS idx_grocery_list_items_recipe ON grocery_list_items(grocery_list_id, recipe_id);
 CREATE INDEX IF NOT EXISTS idx_pantry_items_name ON pantry_items(name COLLATE NOCASE);
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
