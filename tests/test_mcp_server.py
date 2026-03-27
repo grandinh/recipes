@@ -58,7 +58,7 @@ async def test_mcp_list_tools(mcp_client):
     assert "search_recipes" in tool_names
     assert "create_recipe" in tool_names
     assert "find_recipes_from_pantry" in tool_names
-    assert len(tool_names) >= 24
+    assert len(tool_names) >= 28
 
 
 # ---------------------------------------------------------------------------
@@ -458,3 +458,162 @@ async def test_mcp_recipe_to_grocery_list_flow(mcp_client):
     assert data["name"] == "Flow List"
     assert "items" in data
     assert len(data["items"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Grocery Item Management (delete, clear, move)
+# ---------------------------------------------------------------------------
+
+
+async def test_mcp_delete_grocery_item(mcp_client):
+    recipe = await mcp_client.call_tool(
+        "create_recipe", {"title": "R", "ingredients": ["1 egg"]}
+    )
+    recipe_id = _parse_result(recipe)["id"]
+    gl = await mcp_client.call_tool(
+        "generate_grocery_list", {"recipe_ids": [recipe_id]}
+    )
+    list_id = _parse_result(gl)["list_id"]
+    glist = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    item_id = glist["items"][0]["id"]
+
+    result = _parse_result(await mcp_client.call_tool("delete_grocery_item", {"item_id": item_id}))
+    assert "deleted" in result.lower()
+
+    # Verify item is gone
+    glist2 = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    item_ids = [i["id"] for i in glist2["items"]]
+    assert item_id not in item_ids
+
+
+async def test_mcp_delete_grocery_item_not_found(mcp_client):
+    result = _parse_result(await mcp_client.call_tool("delete_grocery_item", {"item_id": 99999}))
+    assert "not found" in result.lower()
+
+
+async def test_mcp_clear_checked_grocery_items(mcp_client):
+    recipe = await mcp_client.call_tool(
+        "create_recipe", {"title": "R", "ingredients": ["1 egg", "2 cups flour"]}
+    )
+    recipe_id = _parse_result(recipe)["id"]
+    gl = await mcp_client.call_tool(
+        "generate_grocery_list", {"recipe_ids": [recipe_id]}
+    )
+    list_id = _parse_result(gl)["list_id"]
+    glist = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    item_id = glist["items"][0]["id"]
+
+    # Check one item
+    await mcp_client.call_tool("check_grocery_item", {"item_id": item_id, "is_checked": True})
+
+    # Clear checked
+    result = _parse_result(await mcp_client.call_tool("clear_checked_grocery_items", {"list_id": list_id}))
+    assert result["cleared_count"] == 1
+
+    # Verify one item was removed
+    glist2 = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    assert len(glist2["items"]) == len(glist["items"]) - 1
+
+
+async def test_mcp_clear_checked_list_not_found(mcp_client):
+    result = _parse_result(await mcp_client.call_tool("clear_checked_grocery_items", {"list_id": 99999}))
+    assert "error" in result
+
+
+async def test_mcp_move_checked_to_pantry(mcp_client):
+    """Full workflow: generate grocery list -> check items -> move to pantry."""
+    recipe = await mcp_client.call_tool(
+        "create_recipe", {"title": "R", "ingredients": ["1 egg", "2 cups flour"]}
+    )
+    recipe_id = _parse_result(recipe)["id"]
+    gl = await mcp_client.call_tool(
+        "generate_grocery_list", {"recipe_ids": [recipe_id]}
+    )
+    list_id = _parse_result(gl)["list_id"]
+    glist = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+
+    # Check all items
+    for item in glist["items"]:
+        await mcp_client.call_tool("check_grocery_item", {"item_id": item["id"], "is_checked": True})
+
+    # Move to pantry
+    result = _parse_result(await mcp_client.call_tool("move_checked_to_pantry", {"list_id": list_id}))
+    assert len(result["moved"]) > 0
+    assert isinstance(result["already_in_pantry"], list)
+
+    # Verify pantry has items
+    pantry = _parse_result(await mcp_client.call_tool("list_pantry_items", {}))
+    assert len(pantry) > 0
+
+    # Verify grocery list is empty
+    glist2 = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    assert len(glist2["items"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Pantry sanitization
+# ---------------------------------------------------------------------------
+
+
+async def test_mcp_pantry_sanitizes_html(mcp_client):
+    """Verify that dangerous HTML in pantry names is stripped."""
+    result = await mcp_client.call_tool(
+        "add_pantry_item", {"name": "<script>alert(1)</script>Flour", "category": "<script>x</script>Baking"}
+    )
+    data = _parse_result(result)
+    assert "<script>" not in data["name"]
+    assert "Flour" in data["name"]
+    assert "<script>" not in data["category"]
+    assert "Baking" in data["category"]
+
+
+# ---------------------------------------------------------------------------
+# Photo upload
+# ---------------------------------------------------------------------------
+
+
+async def test_mcp_upload_recipe_photo(mcp_client, tmp_path):
+    """Upload a valid photo via MCP tool."""
+    import base64
+    from PIL import Image
+    import io
+
+    # Create a small test image
+    img = Image.new("RGB", (100, 100), color="red")
+    buf = io.BytesIO()
+    img.save(buf, "JPEG")
+    b64_data = base64.b64encode(buf.getvalue()).decode()
+
+    recipe = await mcp_client.call_tool("create_recipe", {"title": "Photo Recipe"})
+    recipe_id = _parse_result(recipe)["id"]
+
+    result = _parse_result(
+        await mcp_client.call_tool(
+            "upload_recipe_photo",
+            {"recipe_id": recipe_id, "image_base64": b64_data},
+        )
+    )
+    assert result["recipe_id"] == recipe_id
+    assert result["photo_path"].endswith(".jpg")
+
+
+async def test_mcp_upload_recipe_photo_not_found(mcp_client):
+    result = _parse_result(
+        await mcp_client.call_tool(
+            "upload_recipe_photo",
+            {"recipe_id": 99999, "image_base64": "dGVzdA=="},
+        )
+    )
+    assert "error" in result
+
+
+async def test_mcp_upload_recipe_photo_invalid_base64(mcp_client):
+    recipe = await mcp_client.call_tool("create_recipe", {"title": "Bad Photo"})
+    recipe_id = _parse_result(recipe)["id"]
+    result = _parse_result(
+        await mcp_client.call_tool(
+            "upload_recipe_photo",
+            {"recipe_id": recipe_id, "image_base64": "not-valid-base64!!!"},
+        )
+    )
+    assert "error" in result

@@ -428,6 +428,34 @@ async def delete_grocery_list(list_id: int) -> str:
     return f"Grocery list {list_id} deleted" if deleted else f"Grocery list {list_id} not found"
 
 
+@mcp.tool
+async def delete_grocery_item(item_id: int) -> str:
+    """Delete a single item from a grocery list."""
+    db = await get_db()
+    deleted = await db_module.delete_grocery_item(db, item_id)
+    return f"Item {item_id} deleted" if deleted else f"Item {item_id} not found"
+
+
+@mcp.tool
+async def clear_checked_grocery_items(list_id: int) -> dict:
+    """Remove all checked (purchased) items from a grocery list.
+    Returns the number of items cleared."""
+    db = await get_db()
+    result = await db_module.clear_checked_grocery_items(db, list_id)
+    if result is None:
+        return {"error": f"Grocery list {list_id} not found"}
+    return result
+
+
+@mcp.tool
+async def move_checked_to_pantry(list_id: int) -> dict:
+    """Move checked grocery items to the pantry and remove them from the list.
+    Items already in the pantry are skipped (no duplicates).
+    Returns lists of moved items, already-in-pantry items, and any warnings."""
+    db = await get_db()
+    return await db_module.move_checked_to_pantry(db, list_id)
+
+
 # ---------------------------------------------------------------------------
 # Pantry Tools
 # ---------------------------------------------------------------------------
@@ -494,6 +522,42 @@ async def find_recipes_from_pantry(max_missing: int = 2) -> list[dict]:
         return []
 
     return await _find(db, pantry, max_missing)
+
+
+@mcp.tool
+async def upload_recipe_photo(
+    recipe_id: int,
+    image_base64: str,
+    media_type: str = "image/jpeg",
+) -> dict:
+    """Upload a photo for an existing recipe.
+
+    recipe_id: ID of the recipe to attach the photo to.
+    image_base64: Base64-encoded image data (JPEG, PNG, WebP, or GIF).
+    media_type: MIME type of the image. Default: image/jpeg.
+    """
+    import base64 as b64
+
+    from recipe_app.models import RecipeUpdate
+    from recipe_app.photos import save_photo
+
+    db = await get_db()
+    recipe = await db_module.get_recipe(db, recipe_id)
+    if not recipe:
+        return {"error": f"Recipe {recipe_id} not found"}
+
+    try:
+        image_data = b64.b64decode(image_base64)
+    except Exception:
+        return {"error": "Invalid base64 image data"}
+
+    try:
+        filename = await save_photo(image_data)
+    except ValueError as e:
+        return {"error": f"Invalid image: {e}"}
+
+    await db_module.update_recipe(db, recipe_id, RecipeUpdate(photo_path=filename))
+    return {"recipe_id": recipe_id, "photo_path": filename}
 
 
 def main():

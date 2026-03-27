@@ -1048,6 +1048,90 @@ async def add_grocery_item(db: aiosqlite.Connection, list_id: int, text: str) ->
     return await cursor.fetchone()
 
 
+async def delete_grocery_item(db: aiosqlite.Connection, item_id: int) -> bool:
+    """Delete a single item from a grocery list. Returns True if deleted."""
+    async with _write_lock:
+        cursor = await db.execute(
+            "DELETE FROM grocery_list_items WHERE id = ? RETURNING id",
+            (item_id,),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+        return row is not None
+
+
+async def clear_checked_grocery_items(db: aiosqlite.Connection, list_id: int) -> dict | None:
+    """Delete all checked items from a grocery list. Returns None if list not found."""
+    async with _write_lock:
+        cursor = await db.execute(
+            "SELECT id FROM grocery_lists WHERE id = ?", (list_id,),
+        )
+        if not await cursor.fetchone():
+            return None
+        cursor = await db.execute(
+            "DELETE FROM grocery_list_items WHERE grocery_list_id = ? AND is_checked = 1",
+            (list_id,),
+        )
+        await db.commit()
+        return {"list_id": list_id, "cleared_count": cursor.rowcount}
+
+
+async def move_checked_to_pantry(db: aiosqlite.Connection, list_id: int) -> dict:
+    """Move checked grocery items to pantry (name-only). Returns summary."""
+    async with _write_lock:
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+
+            cursor = await db.execute(
+                "SELECT id, text, normalized_name, aisle FROM grocery_list_items "
+                "WHERE grocery_list_id = ? AND is_checked = 1",
+                (list_id,),
+            )
+            checked_items = await cursor.fetchall()
+            if not checked_items:
+                await db.commit()
+                return {"moved": [], "already_in_pantry": [], "warnings": []}
+
+            moved, already_in_pantry, warnings = [], [], []
+
+            for row in checked_items:
+                item_id = row["id"]
+                name = row["normalized_name"] or row["text"]
+                aisle = row["aisle"]
+
+                sanitized = sanitize_field(name)
+                if not sanitized:
+                    warnings.append(f"Skipped item with unsanitizable name: {row['text']!r}")
+                    continue
+                name = sanitized
+                category = sanitize_field(aisle) if aisle else None
+
+                cursor2 = await db.execute(
+                    """INSERT INTO pantry_items (name, category)
+                       VALUES (?, ?)
+                       ON CONFLICT(name) DO NOTHING
+                       RETURNING id""",
+                    (name, category),
+                )
+                inserted = await cursor2.fetchone()
+
+                if inserted:
+                    moved.append(name)
+                else:
+                    already_in_pantry.append(name)
+
+                await db.execute(
+                    "DELETE FROM grocery_list_items WHERE id = ?", (item_id,),
+                )
+
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    return {"moved": moved, "already_in_pantry": already_in_pantry, "warnings": warnings}
+
+
 async def add_recipe_to_grocery_list(
     db: aiosqlite.Connection,
     recipe_id: int,
@@ -1086,6 +1170,9 @@ async def add_pantry_item(
     unit: str | None = None,
     expiration_date: str | None = None,
 ) -> dict:
+    name = sanitize_field(name)
+    if category:
+        category = sanitize_field(category)
     async with _write_lock:
         cursor = await db.execute(
             """
@@ -1108,6 +1195,11 @@ async def update_pantry_item(db: aiosqlite.Connection, item_id: int, **kwargs) -
     if not fields:
         cursor = await db.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,))
         return await cursor.fetchone()
+
+    if "name" in fields:
+        fields["name"] = sanitize_field(fields["name"])
+    if "category" in fields:
+        fields["category"] = sanitize_field(fields["category"])
 
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values()) + [item_id]

@@ -31,9 +31,48 @@
   <span class="grocery-remaining" id="grocery-remaining"></span>
 </div>
 
+{# Bulk actions #}
+<div class="grocery-bulk-actions">
+  <button class="btn btn-secondary btn-sm"
+          hx-post="/grocery-lists/{{ glist.id }}/move-to-pantry"
+          hx-target="#items-list"
+          hx-swap="innerHTML"
+          hx-disabled-elt="this">
+    Move Checked to Pantry
+  </button>
+  <button class="btn btn-secondary btn-sm"
+          hx-post="/grocery-lists/{{ glist.id }}/clear-checked"
+          hx-target="#items-list"
+          hx-swap="innerHTML"
+          hx-confirm="Remove all checked items?"
+          hx-disabled-elt="this">
+    Clear Checked
+  </button>
+</div>
+
 {# Items list #}
 {% block items_list %}
 <div id="items-list" hx-sync="this:replace">
+  {% if move_result %}
+    {% if move_result.moved %}
+      <div class="alert alert-success">
+        Moved to pantry: {{ move_result.moved | join(', ') }}
+      </div>
+    {% endif %}
+    {% if move_result.already_in_pantry %}
+      <div class="alert alert-info">
+        Already in pantry: {{ move_result.already_in_pantry | join(', ') }}
+      </div>
+    {% endif %}
+    {% if move_result.warnings %}
+      <div class="alert alert-warning">
+        {% for w in move_result.warnings %}
+          <p>{{ w }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endif %}
+
   {% if aisle_groups %}
     {% for aisle, items in aisle_groups %}
       <details class="aisle-section" open>
@@ -60,6 +99,13 @@
                   {% endif %}
                 </label>
               </form>
+              <button class="btn-icon btn-delete-item"
+                      hx-post="/grocery-lists/{{ glist.id }}/delete-item/{{ item.id }}"
+                      hx-target="#items-list"
+                      hx-swap="innerHTML"
+                      hx-confirm="Delete this item?"
+                      hx-disabled-elt="this"
+                      title="Delete item">&times;</button>
             </li>
             {% endblock %}
           {% endfor %}
@@ -83,6 +129,13 @@
               <span class="grocery-text {% if item.is_checked %}strikethrough{% endif %}">{{ item.text }}</span>
             </label>
           </form>
+          <button class="btn-icon btn-delete-item"
+                  hx-post="/grocery-lists/{{ glist.id }}/delete-item/{{ item.id }}"
+                  hx-target="#items-list"
+                  hx-swap="innerHTML"
+                  hx-confirm="Delete this item?"
+                  hx-disabled-elt="this"
+                  title="Delete item">&times;</button>
         </li>
       {% endfor %}
     </ul>

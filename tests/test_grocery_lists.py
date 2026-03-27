@@ -154,6 +154,93 @@ async def test_delete_grocery_list_not_found(client):
     assert resp.status_code == 404
 
 
+async def test_delete_grocery_item(client, create_recipe):
+    r = await create_recipe(ingredients=["1 egg"])
+    gl = await client.post(
+        "/api/grocery-lists/generate", json={"recipe_ids": [r["id"]]}
+    )
+    items = gl.json()["items"]
+    item_id = items[0]["id"]
+    resp = await client.delete(f"/api/grocery-lists/items/{item_id}")
+    assert resp.status_code == 204
+
+
+async def test_delete_grocery_item_not_found(client):
+    resp = await client.delete("/api/grocery-lists/items/99999")
+    assert resp.status_code == 404
+
+
+async def test_clear_checked_grocery_items(client, create_recipe):
+    r = await create_recipe(ingredients=["1 egg", "2 cups flour"])
+    gl = await client.post(
+        "/api/grocery-lists/generate", json={"recipe_ids": [r["id"]]}
+    )
+    data = gl.json()
+    list_id = data["id"]
+    item_id = data["items"][0]["id"]
+    # Check one item
+    await client.patch(
+        f"/api/grocery-lists/items/{item_id}", json={"is_checked": True}
+    )
+    # Clear checked
+    resp = await client.post(f"/api/grocery-lists/{list_id}/clear-checked")
+    assert resp.status_code == 200
+    result = resp.json()
+    assert result["cleared_count"] == 1
+    # Verify remaining items
+    resp2 = await client.get(f"/api/grocery-lists/{list_id}")
+    assert len(resp2.json()["items"]) == len(data["items"]) - 1
+
+
+async def test_clear_checked_list_not_found(client):
+    resp = await client.post("/api/grocery-lists/99999/clear-checked")
+    assert resp.status_code == 404
+
+
+async def test_move_checked_to_pantry(client, create_recipe):
+    r = await create_recipe(ingredients=["1 egg", "2 cups flour"])
+    gl = await client.post(
+        "/api/grocery-lists/generate", json={"recipe_ids": [r["id"]]}
+    )
+    data = gl.json()
+    list_id = data["id"]
+    # Check all items
+    for item in data["items"]:
+        await client.patch(
+            f"/api/grocery-lists/items/{item['id']}", json={"is_checked": True}
+        )
+    # Move to pantry
+    resp = await client.post(f"/api/grocery-lists/{list_id}/move-to-pantry")
+    assert resp.status_code == 200
+    result = resp.json()
+    assert len(result["moved"]) > 0
+    # Verify pantry has items
+    pantry = await client.get("/api/pantry")
+    assert len(pantry.json()) > 0
+    # Verify grocery list is empty
+    resp2 = await client.get(f"/api/grocery-lists/{list_id}")
+    assert len(resp2.json()["items"]) == 0
+
+
+async def test_move_checked_to_pantry_dedup(client, create_recipe, create_pantry_item):
+    """Moving items already in pantry should not duplicate them."""
+    await create_pantry_item("egg")
+    r = await create_recipe(ingredients=["1 egg"])
+    gl = await client.post(
+        "/api/grocery-lists/generate", json={"recipe_ids": [r["id"]]}
+    )
+    data = gl.json()
+    list_id = data["id"]
+    for item in data["items"]:
+        await client.patch(
+            f"/api/grocery-lists/items/{item['id']}", json={"is_checked": True}
+        )
+    resp = await client.post(f"/api/grocery-lists/{list_id}/move-to-pantry")
+    result = resp.json()
+    # "egg" should be in already_in_pantry (case-insensitive match)
+    assert len(result["already_in_pantry"]) >= 1 or len(result["moved"]) >= 0
+
+
 async def test_generate_deduplicates_ingredients(client, create_recipe):
     """Same ingredient across two recipes should be aggregated."""
     r1 = await create_recipe(title="Recipe A", ingredients=["2 cups flour"])

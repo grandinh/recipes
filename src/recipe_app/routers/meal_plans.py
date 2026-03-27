@@ -154,3 +154,24 @@ async def update_grocery_item_endpoint(
     if result is None:
         raise HTTPException(status_code=404, detail="Grocery item not found")
     return result
+
+
+@router.delete("/api/grocery-lists/items/{item_id}", status_code=204)
+async def delete_grocery_item_endpoint(item_id: int, db=Depends(get_db)):
+    deleted = await db_module.delete_grocery_item(db, item_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Grocery item not found")
+
+
+@router.post("/api/grocery-lists/{list_id}/clear-checked")
+async def clear_checked_grocery_items_endpoint(list_id: int, db=Depends(get_db)):
+    result = await db_module.clear_checked_grocery_items(db, list_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Grocery list not found")
+    return result
+
+
+@router.post("/api/grocery-lists/{list_id}/move-to-pantry")
+async def move_checked_to_pantry_endpoint(list_id: int, db=Depends(get_db)):
+    result = await db_module.move_checked_to_pantry(db, list_id)
+    return result

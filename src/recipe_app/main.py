@@ -23,6 +23,7 @@ from recipe_app.db import (
     get_meal_plan_week, list_recipe_titles,
     list_grocery_lists, get_grocery_list, generate_grocery_list,
     check_grocery_item, add_grocery_item, delete_grocery_list,
+    delete_grocery_item, clear_checked_grocery_items, move_checked_to_pantry,
     add_recipe_to_grocery_list,
     list_pantry_items, add_pantry_item, delete_pantry_item,
 )
@@ -516,6 +517,61 @@ async def delete_grocery_list_submit(request: Request, list_id: int):
     db = get_db(request)
     await delete_grocery_list(db, list_id)
     return RedirectResponse("/grocery-lists", status_code=303)
+
+
+@app.post("/grocery-lists/{list_id}/delete-item/{item_id}")
+async def delete_grocery_item_submit(
+    request: Request, list_id: int, item_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    await delete_grocery_item(db, item_id)
+    if hx_request:
+        glist = await get_grocery_list(db, list_id)
+        aisle_groups = _build_aisle_groups(glist)
+        return templates.TemplateResponse(
+            request, "grocery_list_detail.html",
+            {"glist": glist, "aisle_groups": aisle_groups},
+            block_name="items_list",
+        )
+    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+
+
+@app.post("/grocery-lists/{list_id}/clear-checked")
+async def clear_checked_submit(
+    request: Request, list_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    await clear_checked_grocery_items(db, list_id)
+    if hx_request:
+        glist = await get_grocery_list(db, list_id)
+        aisle_groups = _build_aisle_groups(glist)
+        return templates.TemplateResponse(
+            request, "grocery_list_detail.html",
+            {"glist": glist, "aisle_groups": aisle_groups},
+            block_name="items_list",
+        )
+    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+
+
+@app.post("/grocery-lists/{list_id}/move-to-pantry")
+async def move_to_pantry_submit(
+    request: Request, list_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    result = await move_checked_to_pantry(db, list_id)
+    if hx_request:
+        glist = await get_grocery_list(db, list_id)
+        aisle_groups = _build_aisle_groups(glist)
+        return templates.TemplateResponse(
+            request, "grocery_list_detail.html",
+            {"glist": glist, "aisle_groups": aisle_groups,
+             "move_result": result},
+            block_name="items_list",
+        )
+    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
 
 
 @app.post("/recipes/{recipe_id}/add-to-grocery-list")
