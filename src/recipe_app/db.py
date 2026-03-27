@@ -288,6 +288,34 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         await db.commit()
         logger.info("Migration v1 -> v2 complete")
 
+    if version < 3:
+        db_path = str(settings.database_path)
+        backup = f"{db_path}.backup-v{version}-{datetime.now():%Y%m%d%H%M%S}"
+        shutil.copy2(db_path, backup)
+        logger.info("Database backed up to %s before v3 migration", backup)
+
+        if not await _column_exists(db, "grocery_list_items", "aisle"):
+            await db.execute(
+                "ALTER TABLE grocery_list_items ADD COLUMN aisle TEXT DEFAULT 'Other'"
+            )
+        if not await _column_exists(db, "grocery_list_items", "recipe_id"):
+            await db.execute(
+                "ALTER TABLE grocery_list_items ADD COLUMN recipe_id INTEGER REFERENCES recipes(id) ON DELETE SET NULL"
+            )
+        if not await _column_exists(db, "grocery_list_items", "normalized_name"):
+            await db.execute(
+                "ALTER TABLE grocery_list_items ADD COLUMN normalized_name TEXT"
+            )
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_grocery_list_items_recipe
+                ON grocery_list_items(grocery_list_id, recipe_id)
+        """)
+
+        await db.execute("PRAGMA user_version = 3")
+        await db.commit()
+        logger.info("Migration v2 -> v3 complete")
+
 
 @asynccontextmanager
 async def lifespan(app: Any):
@@ -321,6 +349,7 @@ async def connect() -> aiosqlite.Connection:
     await db.execute("PRAGMA foreign_keys = ON")
     await db.execute("PRAGMA busy_timeout = 5000")
     await init_schema(db)
+    await run_migrations(db)
     return db
 
 
@@ -483,12 +512,19 @@ async def update_recipe(
 async def delete_recipe(db: aiosqlite.Connection, recipe_id: int) -> bool:
     """Delete a recipe, its FTS5 entry, and cascade categories.
 
+    Also sets grocery_list_items.recipe_id to NULL (application-layer FK
+    enforcement since ALTER TABLE silently ignores FK constraints).
     Returns True if a row was deleted.
     """
     async with _write_lock:
         try:
             await db.execute("BEGIN IMMEDIATE")
             await _fts_delete(db, recipe_id)
+            # Application-layer FK cleanup for grocery list items
+            await db.execute(
+                "UPDATE grocery_list_items SET recipe_id = NULL WHERE recipe_id = ?",
+                (recipe_id,),
+            )
             cursor = await db.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
             await db.commit()
         except Exception:
@@ -834,78 +870,195 @@ async def remove_meal_plan_entry(db: aiosqlite.Connection, entry_id: int) -> boo
 # CRUD — Grocery Lists
 # ---------------------------------------------------------------------------
 
+def _aggregate_ingredients(
+    raw_ingredients: list[tuple[str, int, int | None, int | None]],
+) -> list[dict]:
+    """Parse, normalize, classify, and aggregate ingredients.
+
+    Each input tuple: (ingredient_text, recipe_id, servings_override, base_servings).
+    Pure CPU-bound function — no DB, no async.  Testable in isolation.
+
+    Returns list of dicts with keys: text, aisle, sort_order, recipe_id, normalized_name.
+    """
+    from fractions import Fraction as _Fraction
+    from recipe_app.ingredient_parser import parse_ingredient
+    from recipe_app.normalizer import normalize_ingredient_name
+    from recipe_app.aisle_map import assign_aisle
+    from recipe_app.scaling import format_quantity
+
+    # aggregation_key -> {qty: Fraction|None, unit: str|None, name: str, texts: [str], recipe_ids: set}
+    buckets: dict[tuple[str, str | None], dict] = {}
+    result_order: list[tuple[str, str | None]] = []  # preserve insertion order
+
+    for ing_text, recipe_id, servings_override, base_servings in raw_ingredients:
+        try:
+            parsed = parse_ingredient(ing_text, preserve_fractions=True)
+        except Exception:
+            parsed = {
+                "name": None, "quantity": None, "unit": None,
+                "original_text": ing_text, "scalable": False,
+            }
+
+        raw_name = parsed.get("name") or parsed.get("original_text") or ing_text
+        norm = normalize_ingredient_name(raw_name)
+        aisle_name, aisle_order = assign_aisle(norm.name)
+
+        qty = parsed.get("quantity")
+        unit = parsed.get("unit")
+
+        # Apply servings scaling if override differs from base
+        if (
+            qty is not None
+            and isinstance(qty, _Fraction)
+            and servings_override is not None
+            and base_servings is not None
+            and base_servings > 0
+        ):
+            qty = qty * _Fraction(servings_override, base_servings)
+
+        # Aggregation key: (normalized_name, unit_if_quantified)
+        # Items with no quantity never merge with quantified items
+        if qty is None or not parsed.get("scalable"):
+            agg_key = (norm.name, None)
+        else:
+            agg_key = (norm.name, unit)
+
+        if agg_key in buckets:
+            bucket = buckets[agg_key]
+            # Sum quantities if both have numeric qty
+            if qty is not None and isinstance(qty, _Fraction) and bucket["qty"] is not None:
+                bucket["qty"] += qty
+            bucket["texts"].append(ing_text)
+            bucket["recipe_ids"].add(recipe_id)
+        else:
+            buckets[agg_key] = {
+                "qty": qty if isinstance(qty, _Fraction) else None,
+                "unit": unit,
+                "normalized_name": norm.name,
+                "original_name": raw_name,
+                "aisle": aisle_name,
+                "aisle_order": aisle_order,
+                "texts": [ing_text],
+                "recipe_ids": {recipe_id},
+            }
+            result_order.append(agg_key)
+
+    # Build output sorted by aisle order, then name
+    items = []
+    sorted_keys = sorted(result_order, key=lambda k: (buckets[k]["aisle_order"], buckets[k]["normalized_name"]))
+    for i, key in enumerate(sorted_keys):
+        b = buckets[key]
+        # Format the display text
+        if b["qty"] is not None:
+            formatted_qty = format_quantity(b["qty"])
+            parts = [formatted_qty]
+            if b["unit"]:
+                parts.append(b["unit"])
+            parts.append(b["original_name"])
+            display_text = " ".join(parts)
+        else:
+            display_text = b["texts"][0]  # use original text for unquantified
+
+        items.append({
+            "text": display_text,
+            "aisle": b["aisle"],
+            "sort_order": i,
+            "recipe_id": next(iter(b["recipe_ids"])),  # first recipe
+            "normalized_name": b["normalized_name"],
+        })
+
+    return items
+
+
 async def generate_grocery_list(
     db: aiosqlite.Connection,
     name: str | None = None,
     meal_plan_id: int | None = None,
     recipe_ids: list[int] | None = None,
+    date_start: str | None = None,
+    date_end: str | None = None,
 ) -> dict:
     """Generate a grocery list from a meal plan or list of recipe IDs.
 
-    Parses ingredients on-the-fly, aggregates by name, and creates the list.
+    Parses ingredients, normalizes, assigns aisles, and aggregates
+    using Fraction arithmetic.  CPU-bound work runs via asyncio.to_thread().
     """
-    # Collect recipe IDs
-    ids_to_fetch: list[int] = []
+    # 1. Fetch ingredient data (async, on event loop)
+    raw_ingredients: list[tuple[str, int, int | None, int | None]] = []
+
     if meal_plan_id:
-        cursor = await db.execute(
-            "SELECT recipe_id FROM meal_plan_entries WHERE meal_plan_id = ?",
-            (meal_plan_id,),
-        )
-        ids_to_fetch = [r["recipe_id"] for r in await cursor.fetchall()]
-    elif recipe_ids:
-        ids_to_fetch = recipe_ids
+        # Use JOIN to preserve duplicates (same recipe on multiple days)
+        date_filter = ""
+        params: list = [meal_plan_id]
+        if date_start and date_end:
+            date_filter = " AND e.date BETWEEN ? AND ?"
+            params.extend([date_start, date_end])
 
-    if not ids_to_fetch:
-        ids_to_fetch = []
-
-    # Fetch all ingredients in one query
-    all_ingredients: list[str] = []
-    if ids_to_fetch:
-        placeholders = ",".join("?" for _ in ids_to_fetch)
         cursor = await db.execute(
-            f"SELECT ingredients FROM recipes WHERE id IN ({placeholders})",
-            ids_to_fetch,
+            f"""
+            SELECT r.id as recipe_id, r.ingredients, r.base_servings,
+                   e.servings_override
+              FROM meal_plan_entries e
+              JOIN recipes r ON r.id = e.recipe_id
+             WHERE e.meal_plan_id = ?{date_filter}
+            """,
+            params,
         )
-        for row in await cursor.fetchall():
+        rows = await cursor.fetchall()
+        for row in rows:
             if row["ingredients"]:
-                all_ingredients.extend(json.loads(row["ingredients"]))
+                ingredients_list = json.loads(row["ingredients"])
+                for ing in ingredients_list:
+                    raw_ingredients.append((
+                        ing,
+                        row["recipe_id"],
+                        row["servings_override"],
+                        row["base_servings"],
+                    ))
+    elif recipe_ids:
+        for rid in recipe_ids:
+            cursor = await db.execute(
+                "SELECT id, ingredients, base_servings FROM recipes WHERE id = ?",
+                (rid,),
+            )
+            row = await cursor.fetchone()
+            if row and row["ingredients"]:
+                ingredients_list = json.loads(row["ingredients"])
+                for ing in ingredients_list:
+                    raw_ingredients.append((ing, row["id"], None, row["base_servings"]))
 
-    # Try to aggregate by parsing (best-effort)
-    aggregated: dict[str, str] = {}
-    try:
-        from recipe_app.ingredient_parser import parse_recipe_ingredients
-        parsed = parse_recipe_ingredients(all_ingredients)
-        for p in parsed:
-            key = (p.get("name") or p["original_text"]).lower().strip()
-            if key in aggregated:
-                # Simple aggregation: if same name, try to sum quantities
-                existing = aggregated[key]
-                if p.get("scalable") and p.get("quantity"):
-                    # Append with "+" for now
-                    aggregated[key] = f"{existing} + {p['original_text']}"
-                # else keep existing
-            else:
-                aggregated[key] = p["original_text"]
-    except Exception:
-        # Fallback: just use raw ingredient strings
-        for ing in all_ingredients:
-            aggregated[ing.lower().strip()] = ing
+    # 2. CPU-bound aggregation (off event loop)
+    aggregated = await asyncio.to_thread(_aggregate_ingredients, raw_ingredients)
 
-    list_name = name or "Shopping List"
+    # 3. DB writes (async, inside write lock + explicit transaction)
+    list_name = sanitize_field(name) if name else "Shopping List"
 
     async with _write_lock:
-        cursor = await db.execute(
-            "INSERT INTO grocery_lists (name, meal_plan_id) VALUES (?, ?)",
-            (list_name, meal_plan_id),
-        )
-        list_id = cursor.lastrowid
-        items = list(aggregated.values())
-        for i, text in enumerate(sorted(items)):
-            await db.execute(
-                "INSERT INTO grocery_list_items (grocery_list_id, text, sort_order) VALUES (?, ?, ?)",
-                (list_id, text, i),
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "INSERT INTO grocery_lists (name, meal_plan_id) VALUES (?, ?)",
+                (list_name, meal_plan_id),
             )
-        await db.commit()
+            list_id = cursor.lastrowid
+            for item in aggregated:
+                await db.execute(
+                    """INSERT INTO grocery_list_items
+                       (grocery_list_id, text, sort_order, aisle, recipe_id, normalized_name)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        list_id,
+                        sanitize_field(item["text"]),
+                        item["sort_order"],
+                        sanitize_field(item["aisle"]),
+                        item["recipe_id"],
+                        sanitize_field(item["normalized_name"]) if item["normalized_name"] else None,
+                    ),
+                )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
 
     return await get_grocery_list(db, list_id)
 
@@ -916,7 +1069,11 @@ async def get_grocery_list(db: aiosqlite.Connection, list_id: int) -> dict | Non
     if glist is None:
         return None
     cursor = await db.execute(
-        "SELECT * FROM grocery_list_items WHERE grocery_list_id = ? ORDER BY is_checked, sort_order",
+        """SELECT gli.*, r.title as recipe_title
+             FROM grocery_list_items gli
+             LEFT JOIN recipes r ON r.id = gli.recipe_id
+            WHERE gli.grocery_list_id = ?
+            ORDER BY gli.is_checked, gli.sort_order""",
         (list_id,),
     )
     items = await cursor.fetchall()
@@ -956,6 +1113,7 @@ async def check_grocery_item(db: aiosqlite.Connection, item_id: int, is_checked:
 
 
 async def add_grocery_item(db: aiosqlite.Connection, list_id: int, text: str) -> dict:
+    text = sanitize_field(text)
     async with _write_lock:
         # Get max sort_order inside lock to prevent race condition
         cursor = await db.execute(
@@ -973,6 +1131,59 @@ async def add_grocery_item(db: aiosqlite.Connection, list_id: int, text: str) ->
     item_id = cursor.lastrowid
     cursor = await db.execute("SELECT * FROM grocery_list_items WHERE id = ?", (item_id,))
     return await cursor.fetchone()
+
+
+async def add_recipe_to_grocery_list(
+    db: aiosqlite.Connection,
+    recipe_id: int,
+    list_name: str | None = None,
+) -> dict:
+    """Create a new grocery list from a single recipe's ingredients.
+
+    Normalizes and assigns aisles. Returns the new grocery list.
+    """
+    recipe = await get_recipe(db, recipe_id)
+    if recipe is None:
+        raise ValueError(f"Recipe {recipe_id} not found")
+
+    ingredients = recipe.get("ingredients", [])
+    name = list_name or recipe["title"]
+
+    raw_ingredients = [
+        (ing, recipe_id, None, recipe.get("base_servings"))
+        for ing in ingredients
+    ]
+
+    aggregated = await asyncio.to_thread(_aggregate_ingredients, raw_ingredients)
+
+    async with _write_lock:
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "INSERT INTO grocery_lists (name) VALUES (?)",
+                (sanitize_field(name),),
+            )
+            list_id = cursor.lastrowid
+            for item in aggregated:
+                await db.execute(
+                    """INSERT INTO grocery_list_items
+                       (grocery_list_id, text, sort_order, aisle, recipe_id, normalized_name)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        list_id,
+                        sanitize_field(item["text"]),
+                        item["sort_order"],
+                        sanitize_field(item["aisle"]),
+                        item["recipe_id"],
+                        sanitize_field(item["normalized_name"]) if item["normalized_name"] else None,
+                    ),
+                )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    return await get_grocery_list(db, list_id)
 
 
 # ---------------------------------------------------------------------------

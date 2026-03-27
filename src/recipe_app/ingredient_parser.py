@@ -19,11 +19,15 @@ logger = logging.getLogger(__name__)
 # Single ingredient parsing
 # ---------------------------------------------------------------------------
 
-def parse_ingredient(text: str) -> dict:
+def parse_ingredient(text: str, *, preserve_fractions: bool = False) -> dict:
     """Parse a single ingredient string into a structured dict.
 
     Returns a dict with keys: ``name``, ``quantity``, ``quantity_max``,
     ``unit``, ``preparation``, ``original_text``, ``scalable``.
+
+    When ``preserve_fractions=True``, quantities are kept as
+    ``fractions.Fraction`` instead of being converted to float.
+    This is used by the grocery aggregation pipeline for exact arithmetic.
 
     Edge cases handled:
 
@@ -31,13 +35,14 @@ def parse_ingredient(text: str) -> dict:
     - ``isinstance(amount.quantity, str)`` (e.g. "1 dozen") -> ``scalable=False``
     - Malformed input that raises an exception -> ``scalable=False`` fallback
     - ``Fraction`` objects are converted to ``float`` for JSON serialization
+      (unless ``preserve_fractions=True``)
     """
     text = text.strip()
     if not text:
         return _fallback(text)
 
     try:
-        parsed = _lib_parse(text, string_units=True)
+        parsed = _lib_parse(text, string_units=not preserve_fractions)
     except Exception:
         logger.warning("Failed to parse ingredient: %r", text, exc_info=True)
         return _fallback(text)
@@ -73,10 +78,11 @@ def parse_ingredient(text: str) -> dict:
         }
 
     # Normal numeric quantity — scalable
+    convert = (lambda v: v) if preserve_fractions else _fraction_to_float
     return {
         "name": _extract_name(parsed),
-        "quantity": _fraction_to_float(amount.quantity),
-        "quantity_max": _fraction_to_float(amount.quantity_max),
+        "quantity": convert(amount.quantity),
+        "quantity_max": convert(amount.quantity_max),
         "unit": amount.unit if isinstance(amount.unit, str) else str(amount.unit),
         "preparation": _extract_preparation(parsed),
         "original_text": text,

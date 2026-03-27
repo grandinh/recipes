@@ -22,14 +22,56 @@
   </form>
 </section>
 
+{# Filter controls #}
+<div class="grocery-controls" id="grocery-controls">
+  <label class="grocery-filter-label">
+    <input type="checkbox" id="hideCheckedToggle" class="grocery-filter-checkbox">
+    Hide checked items
+  </label>
+  <span class="grocery-remaining" id="grocery-remaining"></span>
+</div>
+
 {# Items list #}
 {% block items_list %}
-<div id="items-list">
-  {% if glist.items %}
+<div id="items-list" hx-sync="this:replace">
+  {% if aisle_groups %}
+    {% for aisle, items in aisle_groups %}
+      <details class="aisle-section" open>
+        <summary class="aisle-header">
+          <span class="aisle-name">{{ aisle }}</span>
+          <span class="aisle-count" data-aisle="{{ aisle }}">{{ items|length }}</span>
+        </summary>
+        <ul class="grocery-items">
+          {% for item in items %}
+            {% block grocery_item scoped %}
+            <li class="grocery-item {% if item.is_checked %}checked{% endif %}"
+                id="item-{{ item.id }}" data-aisle="{{ aisle }}">
+              <form method="post" action="/grocery-lists/{{ glist.id }}/check/{{ item.id }}"
+                    hx-post="/grocery-lists/{{ glist.id }}/check/{{ item.id }}"
+                    hx-target="#item-{{ item.id }}"
+                    hx-swap="outerHTML">
+                <label class="grocery-label">
+                  <input type="hidden" name="is_checked" value="{{ '0' if item.is_checked else '1' }}">
+                  <input type="checkbox" {% if item.is_checked %}checked{% endif %}
+                         class="grocery-checkbox">
+                  <span class="grocery-text {% if item.is_checked %}strikethrough{% endif %}">{{ item.text }}</span>
+                  {% if item.recipe_title %}
+                    <span class="grocery-recipe-badge">{{ item.recipe_title }}</span>
+                  {% endif %}
+                </label>
+              </form>
+            </li>
+            {% endblock %}
+          {% endfor %}
+        </ul>
+      </details>
+    {% endfor %}
+  {% elif glist.items %}
+    {# Fallback: no aisle_groups (e.g., HTMX partial) — render flat list #}
     <ul class="grocery-items">
       {% for item in glist.items %}
-        {% block grocery_item scoped %}
-        <li class="grocery-item {% if item.is_checked %}checked{% endif %}" id="item-{{ item.id }}">
+        <li class="grocery-item {% if item.is_checked %}checked{% endif %}"
+            id="item-{{ item.id }}">
           <form method="post" action="/grocery-lists/{{ glist.id }}/check/{{ item.id }}"
                 hx-post="/grocery-lists/{{ glist.id }}/check/{{ item.id }}"
                 hx-target="#item-{{ item.id }}"
@@ -37,12 +79,11 @@
             <label class="grocery-label">
               <input type="hidden" name="is_checked" value="{{ '0' if item.is_checked else '1' }}">
               <input type="checkbox" {% if item.is_checked %}checked{% endif %}
-                     onchange="this.form.requestSubmit()">
+                     class="grocery-checkbox">
               <span class="grocery-text {% if item.is_checked %}strikethrough{% endif %}">{{ item.text }}</span>
             </label>
           </form>
         </li>
-        {% endblock %}
       {% endfor %}
     </ul>
   {% else %}

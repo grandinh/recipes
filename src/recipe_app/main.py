@@ -23,6 +23,7 @@ from recipe_app.db import (
     get_meal_plan_week, list_recipe_titles,
     list_grocery_lists, get_grocery_list, generate_grocery_list,
     check_grocery_item, add_grocery_item, delete_grocery_list,
+    add_recipe_to_grocery_list,
     list_pantry_items, add_pantry_item, delete_pantry_item,
 )
 from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
@@ -428,6 +429,19 @@ async def _render_calendar_grid(
 
 # --- Grocery Lists web UI ---
 
+def _build_aisle_groups(glist: dict) -> list[tuple[str, list[dict]]]:
+    """Group grocery list items by aisle for template rendering."""
+    aisle_groups: list[tuple[str, list[dict]]] = []
+    aisle_map: dict[str, list[dict]] = {}
+    for item in glist.get("items", []):
+        aisle = item.get("aisle") or "Other"
+        if aisle not in aisle_map:
+            aisle_map[aisle] = []
+            aisle_groups.append((aisle, aisle_map[aisle]))
+        aisle_map[aisle].append(item)
+    return aisle_groups
+
+
 @app.get("/grocery-lists", response_class=HTMLResponse)
 async def grocery_lists_page(request: Request):
     db = get_db(request)
@@ -441,7 +455,11 @@ async def grocery_list_detail_page(request: Request, list_id: int):
     glist = await get_grocery_list(db, list_id)
     if glist is None:
         return HTMLResponse("Grocery list not found", status_code=404)
-    return templates.TemplateResponse(request, "grocery_list_detail.html", {"glist": glist})
+    aisle_groups = _build_aisle_groups(glist)
+    return templates.TemplateResponse(request, "grocery_list_detail.html", {
+        "glist": glist,
+        "aisle_groups": aisle_groups,
+    })
 
 
 @app.post("/grocery-lists/generate")
@@ -484,8 +502,10 @@ async def add_item_submit(
         await add_grocery_item(db, list_id, text)
     if hx_request:
         glist = await get_grocery_list(db, list_id)
+        aisle_groups = _build_aisle_groups(glist)
         return templates.TemplateResponse(
-            request, "grocery_list_detail.html", {"glist": glist},
+            request, "grocery_list_detail.html",
+            {"glist": glist, "aisle_groups": aisle_groups},
             block_name="items_list",
         )
     return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
@@ -496,6 +516,16 @@ async def delete_grocery_list_submit(request: Request, list_id: int):
     db = get_db(request)
     await delete_grocery_list(db, list_id)
     return RedirectResponse("/grocery-lists", status_code=303)
+
+
+@app.post("/recipes/{recipe_id}/add-to-grocery-list")
+async def add_recipe_to_grocery_list_submit(request: Request, recipe_id: int):
+    db = get_db(request)
+    try:
+        glist = await add_recipe_to_grocery_list(db, recipe_id)
+    except ValueError:
+        return HTMLResponse("Recipe not found", status_code=404)
+    return RedirectResponse(f"/grocery-lists/{glist['id']}", status_code=303)
 
 
 # --- Pantry web UI ---

@@ -349,11 +349,31 @@ async def generate_grocery_list(
     meal_plan_id: int | None = None,
     recipe_ids: list[int] | None = None,
     name: str | None = None,
+    date_start: str | None = None,
+    date_end: str | None = None,
 ) -> dict:
     """Generate a grocery list from a meal plan or list of recipe IDs.
-    Aggregates ingredients across recipes. Returns the full list with items."""
+    Aggregates ingredients across recipes with smart normalization and aisle grouping.
+    Supports date_start/date_end (YYYY-MM-DD) to filter meal plan entries by date range.
+    Returns structured data with items grouped by aisle."""
     db = await get_db()
-    return await db_module.generate_grocery_list(db, name=name, meal_plan_id=meal_plan_id, recipe_ids=recipe_ids)
+    glist = await db_module.generate_grocery_list(
+        db, name=name, meal_plan_id=meal_plan_id, recipe_ids=recipe_ids,
+        date_start=date_start, date_end=date_end,
+    )
+    # Build structured response with aisle summary
+    items = glist.get("items", [])
+    aisle_summary = {}
+    for item in items:
+        aisle = item.get("aisle", "Other")
+        aisle_summary[aisle] = aisle_summary.get(aisle, 0) + 1
+    return {
+        "list_id": glist["id"],
+        "name": glist["name"],
+        "items": items,
+        "aisle_summary": aisle_summary,
+        "total_items": len(items),
+    }
 
 
 @mcp.tool
@@ -383,6 +403,21 @@ async def add_grocery_item(list_id: int, text: str) -> dict:
     db = await get_db()
     await db_module.add_grocery_item(db, list_id, text)
     return await db_module.get_grocery_list(db, list_id)
+
+
+@mcp.tool
+async def add_recipe_to_grocery_list(
+    recipe_id: int,
+    list_name: str | None = None,
+) -> dict:
+    """Add a recipe's ingredients (normalized, with aisle assignments) to a new grocery list.
+    If list_name is not provided, the list is named after the recipe.
+    Returns the created grocery list with all items."""
+    db = await get_db()
+    try:
+        return await db_module.add_recipe_to_grocery_list(db, recipe_id, list_name)
+    except ValueError as e:
+        return {"error": str(e)}
 
 
 @mcp.tool

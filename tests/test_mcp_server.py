@@ -336,7 +336,7 @@ async def test_mcp_get_grocery_list(mcp_client):
     gen_result = await mcp_client.call_tool(
         "generate_grocery_list", {"recipe_ids": [recipe_id], "name": "Get List"}
     )
-    list_id = _parse_result(gen_result)["id"]
+    list_id = _parse_result(gen_result)["list_id"]
 
     result = await mcp_client.call_tool("get_grocery_list", {"list_id": list_id})
     data = _parse_result(result)

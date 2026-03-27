@@ -21,8 +21,11 @@ SUPPORTED_MULTIPLIERS: list[float] = [
 # Quantity formatting
 # ---------------------------------------------------------------------------
 
-def format_quantity(value: float) -> str:
+def format_quantity(value: float | Fraction) -> str:
     """Display a numeric quantity as a cooking-friendly fraction string.
+
+    Accepts both ``float`` and ``fractions.Fraction`` directly.
+    When given a ``Fraction``, avoids float round-trip precision loss.
 
     Uses ``fractions.Fraction.limit_denominator(8)`` so the result is
     always a denominator cooks recognise (2, 3, 4, 5, 6, 7, 8).
@@ -36,7 +39,10 @@ def format_quantity(value: float) -> str:
         1.5   -> "1 1/2"
         0.125 -> "1/8"
     """
-    frac = Fraction(value).limit_denominator(8)
+    if isinstance(value, Fraction):
+        frac = value.limit_denominator(8)
+    else:
+        frac = Fraction(value).limit_denominator(8)
 
     if frac.denominator == 1:
         # Whole number

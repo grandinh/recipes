@@ -100,6 +100,8 @@ async def generate_grocery_list_endpoint(
         meal_plan_id=data.meal_plan_id,
         recipe_ids=data.recipe_ids,
         name=data.name,
+        date_start=data.date_start.isoformat() if data.date_start else None,
+        date_end=data.date_end.isoformat() if data.date_end else None,
     )
 
 

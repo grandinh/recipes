@@ -96,7 +96,10 @@ CREATE TABLE IF NOT EXISTS grocery_list_items (
     grocery_list_id INTEGER NOT NULL REFERENCES grocery_lists(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
     is_checked INTEGER NOT NULL DEFAULT 0 CHECK (is_checked IN (0, 1)),
-    sort_order INTEGER NOT NULL DEFAULT 0
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    aisle TEXT DEFAULT 'Other',
+    recipe_id INTEGER REFERENCES recipes(id) ON DELETE SET NULL,
+    normalized_name TEXT
 );
 
 -- v0.3: Pantry
@@ -126,6 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_meal_plan_entries_plan ON meal_plan_entries(meal_
 CREATE INDEX IF NOT EXISTS idx_meal_plan_entries_recipe ON meal_plan_entries(recipe_id);
 CREATE INDEX IF NOT EXISTS idx_meal_plan_entries_date ON meal_plan_entries(meal_plan_id, date);
 CREATE INDEX IF NOT EXISTS idx_grocery_list_items_list ON grocery_list_items(grocery_list_id);
+CREATE INDEX IF NOT EXISTS idx_grocery_list_items_recipe ON grocery_list_items(grocery_list_id, recipe_id);
 CREATE INDEX IF NOT EXISTS idx_pantry_items_name ON pantry_items(name COLLATE NOCASE);
 
 PRAGMA user_version = 2;

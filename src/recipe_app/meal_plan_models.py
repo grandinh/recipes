@@ -1,8 +1,9 @@
 """Pydantic models for meal plans and grocery lists."""
 
+from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class MealPlanCreate(BaseModel):
@@ -32,6 +33,16 @@ class GroceryListGenerate(BaseModel):
     meal_plan_id: int | None = None
     recipe_ids: list[int] | None = None
     name: str | None = None
+    date_start: date | None = None
+    date_end: date | None = None
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if (self.date_start is None) != (self.date_end is None):
+            raise ValueError("date_start and date_end must both be provided or both omitted")
+        if self.date_start and self.date_end and self.date_start > self.date_end:
+            raise ValueError("date_start must be <= date_end")
+        return self
 
 
 class GroceryItemCreate(BaseModel):
@@ -44,3 +55,16 @@ class GroceryItemUpdate(BaseModel):
     """PATCH payload for toggling a grocery item's checked state."""
 
     is_checked: bool
+
+
+class GroceryItemResponse(BaseModel):
+    """Response model for a grocery list item."""
+
+    id: int
+    grocery_list_id: int
+    text: str
+    is_checked: bool
+    sort_order: int
+    aisle: str = "Other"
+    recipe_id: int | None = None
+    normalized_name: str | None = None

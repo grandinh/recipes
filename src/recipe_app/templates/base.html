@@ -28,6 +28,15 @@
     {% block content %}{% endblock %}
   </main>
 
+  {# Timer panel — outside <main> so HTMX swaps never destroy it #}
+  <div id="timer-panel" class="timer-panel" style="display:none"
+       aria-label="Cooking timers" role="region">
+    <button class="timer-panel-toggle" aria-expanded="false">
+      <span class="timer-count">0</span> timers
+    </button>
+    <div class="timer-list" aria-live="polite"></div>
+  </div>
+
   <footer class="site-footer">
     <div class="container">
       {% if recipe_count is defined and recipe_count is not none %}

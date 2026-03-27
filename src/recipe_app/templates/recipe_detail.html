@@ -30,6 +30,11 @@
               data-recipe-id="{{ recipe.id }}">
         Start Cooking
       </button>
+      {% if recipe.ingredients %}
+      <form method="post" action="/recipes/{{ recipe.id }}/add-to-grocery-list" class="inline-form">
+        <button type="submit" class="btn btn-secondary">Add to Grocery List</button>
+      </form>
+      {% endif %}
     </div>
   </header>
 
