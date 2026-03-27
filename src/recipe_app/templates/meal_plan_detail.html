@@ -146,12 +146,6 @@
             </div>
           {% endif %}
         {% endfor %}
-        {% set day_has_entries = false %}
-        {% for slot in meal_slots %}
-          {% if entries_by_cell.get((day|isodate, slot), []) %}
-            {% set day_has_entries = true %}
-          {% endif %}
-        {% endfor %}
         <button type="button" class="calendar-add-btn calendar-add-btn-mobile"
                 data-date="{{ day|isodate }}"
                 data-slot="dinner"

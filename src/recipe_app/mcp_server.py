@@ -371,6 +371,21 @@ async def list_grocery_lists() -> list[dict]:
 
 
 @mcp.tool
+async def check_grocery_item(item_id: int, is_checked: bool) -> dict | None:
+    """Check or uncheck a grocery list item. Returns the updated item."""
+    db = await get_db()
+    return await db_module.check_grocery_item(db, item_id, is_checked)
+
+
+@mcp.tool
+async def add_grocery_item(list_id: int, text: str) -> dict:
+    """Add a manual item to a grocery list. Returns the updated list."""
+    db = await get_db()
+    await db_module.add_grocery_item(db, list_id, text)
+    return await db_module.get_grocery_list(db, list_id)
+
+
+@mcp.tool
 async def delete_grocery_list(list_id: int) -> str:
     """Delete a grocery list and all its items."""
     db = await get_db()

@@ -10,7 +10,7 @@
 <section class="import-progress" style="text-align: center; padding: 3rem 1rem;">
   <p style="font-size: 1.2rem;">Importing your recipes...</p>
   <p class="hint">This page will refresh automatically. You can safely close this tab and check back later.</p>
-  <div hx-get="/import/status/{{ task_id }}" hx-trigger="every 5s" hx-target="body" hx-select="main" hx-swap="innerHTML" hx-select-oob="title">
+  <div hx-get="/import/status/{{ task_id }}" hx-trigger="every 5s" hx-target="main" hx-swap="innerHTML" hx-select="main > *">
   </div>
   <noscript>
     <meta http-equiv="refresh" content="5">

@@ -85,38 +85,38 @@ def parse_paprika_archive(file_bytes: bytes) -> list[dict]:
     except zipfile.BadZipFile as exc:
         raise ValueError(f"Not a valid ZIP file: {exc}") from exc
 
-    entries = zf.infolist()
-    if len(entries) > MAX_RECIPES_PER_IMPORT:
-        raise ValueError(
-            f"Archive contains {len(entries)} entries, maximum is {MAX_RECIPES_PER_IMPORT}"
-        )
-
     recipes = []
-    for info in entries:
-        # Skip directories
-        if info.is_dir():
-            continue
+    with zf:
+        entries = zf.infolist()
+        if len(entries) > MAX_RECIPES_PER_IMPORT:
+            raise ValueError(
+                f"Archive contains {len(entries)} entries, maximum is {MAX_RECIPES_PER_IMPORT}"
+            )
 
-        # Path traversal guard
-        if ".." in info.filename or info.filename.startswith("/"):
-            logger.warning("Skipping suspicious ZIP entry: %s", info.filename)
-            continue
+        for info in entries:
+            # Skip directories
+            if info.is_dir():
+                continue
 
-        # Size guard
-        if info.file_size > MAX_ENTRY_SIZE:
-            logger.warning("Skipping oversized entry: %s (%d bytes)", info.filename, info.file_size)
-            continue
+            # Path traversal guard
+            if ".." in info.filename or info.filename.startswith("/"):
+                logger.warning("Skipping suspicious ZIP entry: %s", info.filename)
+                continue
 
-        try:
-            raw = zf.read(info)
-            decompressed = _safe_gzip_decompress(raw)
-            recipe_dict = json.loads(decompressed.decode("utf-8", errors="replace"))
-            recipes.append(recipe_dict)
-        except (gzip.BadGzipFile, json.JSONDecodeError, ValueError) as exc:
-            logger.warning("Skipping malformed entry %s: %s", info.filename, exc)
-            continue
+            # Size guard
+            if info.file_size > MAX_ENTRY_SIZE:
+                logger.warning("Skipping oversized entry: %s (%d bytes)", info.filename, info.file_size)
+                continue
 
-    zf.close()
+            try:
+                raw = zf.read(info)
+                decompressed = _safe_gzip_decompress(raw)
+                recipe_dict = json.loads(decompressed.decode("utf-8", errors="replace"))
+                recipes.append(recipe_dict)
+            except (gzip.BadGzipFile, json.JSONDecodeError, ValueError) as exc:
+                logger.warning("Skipping malformed entry %s: %s", info.filename, exc)
+                continue
+
     return recipes
 
 
@@ -196,10 +196,6 @@ def map_paprika_recipe(paprika: dict) -> tuple[dict, bytes | None, list[str]]:
         if source_field:
             source_url = source_field  # store as-is, even if not a URL
 
-    # Normalize empty to None
-    if source_url is not None and not source_url.strip():
-        source_url = None
-
     # Categories
     categories = paprika.get("categories")
     if isinstance(categories, list):
@@ -277,7 +273,7 @@ async def import_paprika_recipes(
                 try:
                     photo_filename = await save_photo(photo_bytes)
                     recipe_data.photo_path = photo_filename
-                except (ValueError, Exception) as exc:
+                except Exception as exc:
                     warnings.append(f"Photo processing failed: {exc}")
 
             # Insert into DB
