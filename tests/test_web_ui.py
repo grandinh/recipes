@@ -58,51 +58,46 @@ async def test_search_from_web(client, sample_recipe):
 
 
 # ---------------------------------------------------------------------------
-# Meal plan, grocery list, and pantry page renders
+# Calendar, grocery list, and pantry page renders
 # ---------------------------------------------------------------------------
 
 
-async def test_meal_plans_page(client):
-    resp = await client.get("/meal-plans")
+async def test_calendar_page(client):
+    resp = await client.get("/calendar")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
 
 
-async def test_meal_plan_detail_page(client, create_meal_plan):
-    plan = await create_meal_plan("Test Plan")
-    resp = await client.get(f"/meal-plans/{plan['id']}")
+async def test_calendar_page_with_entries(client, create_recipe):
+    recipe = await create_recipe(title="Calendar Test")
+    from datetime import date, timedelta
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    await client.post("/api/calendar/entries", json={
+        "recipe_id": recipe["id"],
+        "date": monday.isoformat(),
+        "meal_slot": "dinner",
+    })
+    resp = await client.get(f"/calendar?week={monday.isoformat()}")
     assert resp.status_code == 200
-    assert "Test Plan" in resp.text
+    assert "Calendar Test" in resp.text
 
 
-async def test_meal_plan_detail_not_found(client):
-    resp = await client.get("/meal-plans/99999")
-    assert resp.status_code == 404
-
-
-async def test_grocery_lists_page(client):
-    resp = await client.get("/grocery-lists")
+async def test_grocery_page(client):
+    resp = await client.get("/grocery")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
 
 
-async def test_grocery_list_detail_page(client, create_recipe):
+async def test_grocery_page_with_items(client, create_recipe):
     r = await create_recipe(ingredients=["1 egg"])
-    gl = await client.post(
-        "/api/grocery-lists/generate",
-        json={"recipe_ids": [r["id"]], "name": "Test List"},
+    await client.post(
+        "/api/grocery/generate-from-calendar",
+        json={"recipe_ids": [r["id"]]},
     )
-    list_id = gl.json()["id"]
-    resp = await client.get(f"/grocery-lists/{list_id}")
-    # The template may error on rendering — document actual behavior
-    assert resp.status_code in (200, 500)
-    if resp.status_code == 500:
-        assert "Traceback" not in resp.text
-
-
-async def test_grocery_list_detail_not_found(client):
-    resp = await client.get("/grocery-lists/99999")
-    assert resp.status_code == 404
+    resp = await client.get("/grocery")
+    assert resp.status_code == 200
+    assert "aisle-section" in resp.text
 
 
 async def test_pantry_page(client):

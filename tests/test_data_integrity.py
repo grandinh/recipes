@@ -3,11 +3,10 @@
 import asyncio
 
 
-async def test_foreign_keys_are_enforced(client, create_meal_plan):
+async def test_foreign_keys_are_enforced(client):
     """Canary test: verify PRAGMA foreign_keys = ON is active."""
-    plan = await create_meal_plan()
     resp = await client.post(
-        f"/api/meal-plans/{plan['id']}/entries",
+        "/api/calendar/entries",
         json={
             "recipe_id": 999999,
             "date": "2026-03-25",
@@ -18,15 +17,12 @@ async def test_foreign_keys_are_enforced(client, create_meal_plan):
     assert resp.status_code != 201, "FK enforcement appears OFF"
 
 
-async def test_full_meal_planning_flow(client, create_recipe):
-    """Recipe -> meal plan -> add entries -> generate grocery list -> verify items."""
+async def test_full_calendar_planning_flow(client, create_recipe):
+    """Recipe -> calendar entry -> generate grocery items -> verify items."""
     r1 = await create_recipe(title="Flow Recipe", ingredients=["2 cups flour", "1 egg"])
-    plan_resp = await client.post("/api/meal-plans", json={"name": "Flow Plan"})
-    assert plan_resp.status_code == 201
-    plan = plan_resp.json()
 
     await client.post(
-        f"/api/meal-plans/{plan['id']}/entries",
+        "/api/calendar/entries",
         json={
             "recipe_id": r1["id"],
             "date": "2026-03-25",
@@ -35,22 +31,23 @@ async def test_full_meal_planning_flow(client, create_recipe):
     )
 
     gl_resp = await client.post(
-        "/api/grocery-lists/generate",
-        json={"meal_plan_id": plan["id"], "name": "Flow List"},
+        "/api/grocery/generate-from-calendar",
+        json={"date_start": "2026-03-23", "date_end": "2026-03-29"},
     )
     assert gl_resp.status_code == 201
-    gl = gl_resp.json()
-    assert len(gl["items"]) > 0
+    data = gl_resp.json()
+    assert data["items_added"] > 0
+
+    # Verify items are on the global list
+    glist = await client.get("/api/grocery")
+    assert len(glist.json()["items"]) > 0
 
 
-async def test_delete_recipe_cascades_meal_plan_entries(
-    client, create_recipe, create_meal_plan
-):
-    """ON DELETE CASCADE: recipe deletion removes referencing entries."""
+async def test_delete_recipe_cascades_calendar_entries(client, create_recipe):
+    """ON DELETE CASCADE: recipe deletion removes referencing calendar entries."""
     recipe = await create_recipe()
-    plan = await create_meal_plan()
     await client.post(
-        f"/api/meal-plans/{plan['id']}/entries",
+        "/api/calendar/entries",
         json={
             "recipe_id": recipe["id"],
             "date": "2026-03-25",
@@ -58,65 +55,44 @@ async def test_delete_recipe_cascades_meal_plan_entries(
         },
     )
     # Verify entry exists
-    plan_data = await client.get(f"/api/meal-plans/{plan['id']}")
-    assert len(plan_data.json()["entries"]) == 1
+    cal_data = await client.get("/api/calendar?week=2026-03-25")
+    assert len(cal_data.json()["entries"]) == 1
 
     # Delete the recipe
     await client.delete(f"/api/recipes/{recipe['id']}")
 
     # Entry should be gone (CASCADE)
-    plan_data2 = await client.get(f"/api/meal-plans/{plan['id']}")
-    assert len(plan_data2.json()["entries"]) == 0
+    cal_data2 = await client.get("/api/calendar?week=2026-03-25")
+    assert len(cal_data2.json()["entries"]) == 0
 
 
-async def test_delete_meal_plan_nullifies_grocery_list(
-    client, create_recipe, create_meal_plan
-):
-    """ON DELETE SET NULL: plan deletion preserves list but nullifies meal_plan_id."""
-    recipe = await create_recipe()
-    plan = await create_meal_plan()
-    await client.post(
-        f"/api/meal-plans/{plan['id']}/entries",
-        json={
-            "recipe_id": recipe["id"],
-            "date": "2026-03-25",
-            "meal_slot": "dinner",
-        },
-    )
-    gl = await client.post(
-        "/api/grocery-lists/generate",
-        json={"meal_plan_id": plan["id"], "name": "Orphan Test"},
-    )
-    gl_id = gl.json()["id"]
-
-    # Delete the meal plan
-    await client.delete(f"/api/meal-plans/{plan['id']}")
-
-    # Grocery list should still exist
-    resp = await client.get(f"/api/grocery-lists/{gl_id}")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["meal_plan_id"] is None  # SET NULL
-    assert len(data["items"]) > 0  # Items preserved
-
-
-async def test_delete_grocery_list_cascades_items(client, create_recipe):
-    """ON DELETE CASCADE: list deletion removes all items."""
+async def test_clear_checked_removes_items(client, create_recipe):
+    """Clear checked removes all checked items from the global list."""
     r = await create_recipe(ingredients=["1 egg"])
-    gl = await client.post(
-        "/api/grocery-lists/generate", json={"recipe_ids": [r["id"]]}
+    await client.post(
+        "/api/grocery/generate-from-calendar", json={"recipe_ids": [r["id"]]}
     )
-    gl_id = gl.json()["id"]
     # Add a manual item too
-    await client.post(f"/api/grocery-lists/{gl_id}/items", json={"text": "Butter"})
+    await client.post("/api/grocery/items", json={"text": "Butter"})
 
-    # Delete the list
-    resp = await client.delete(f"/api/grocery-lists/{gl_id}")
-    assert resp.status_code == 204
+    glist = await client.get("/api/grocery")
+    items = glist.json()["items"]
+    assert len(items) >= 2
 
-    # List and items are gone
-    resp2 = await client.get(f"/api/grocery-lists/{gl_id}")
-    assert resp2.status_code == 404
+    # Check all items
+    for item in items:
+        await client.patch(
+            f"/api/grocery/items/{item['id']}", json={"is_checked": True}
+        )
+
+    # Clear checked
+    resp = await client.post("/api/grocery/clear-checked")
+    assert resp.status_code == 200
+    assert resp.json()["cleared_count"] == len(items)
+
+    # List should now be empty
+    glist2 = await client.get("/api/grocery")
+    assert len(glist2.json()["items"]) == 0
 
 
 async def test_pantry_matches_after_adding_items(

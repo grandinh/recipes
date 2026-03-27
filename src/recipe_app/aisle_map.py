@@ -1,7 +1,7 @@
 """Aisle keyword map for grocery list grouping.
 
 Pure-function module (no DB access), matching the ``scaling.py`` pattern.
-13 categories with ~8-10 keywords each.  "Other" catches everything else.
+15 categories with ~8-10 keywords each.  "Other" catches everything else.
 Keywords sorted by descending length at module load so longest-match-first
 prevents "coconut milk" from matching Dairy before Canned.
 """
@@ -52,8 +52,8 @@ _AISLE_DATA: dict[tuple[str, int], list[str]] = {
     ],
     ("Condiments & Sauces", 10): [
         "soy sauce", "mustard", "ketchup", "vinegar", "hot sauce",
-        "mayo", "mayonnaise", "worcestershire", "sriracha", "salsa",
-        "barbecue sauce", "teriyaki", "tahini", "pesto",
+        "mayo", "mayonnaise", "worcestershire", "salsa",
+        "barbecue sauce", "teriyaki", "pesto",
     ],
     ("Spices & Seasonings", 11): [
         "cumin", "paprika", "cinnamon", "chili powder", "turmeric",
@@ -71,6 +71,17 @@ _AISLE_DATA: dict[tuple[str, int], list[str]] = {
     ("Snacks & Beverages", 14): [
         "wine", "beer", "juice", "coffee", "tea", "nut",
         "almond", "walnut", "pecan", "cashew", "peanut",
+    ],
+    ("Deli", 15): [
+        "deli", "rotisserie", "prepared salad", "cold cuts",
+        "sliced turkey", "sliced ham", "sliced salami", "prosciutto",
+        "pepperoni", "mortadella",
+    ],
+    ("International/Ethnic", 16): [
+        "curry paste", "fish sauce", "miso", "rice paper", "sriracha",
+        "hoisin", "gochujang", "harissa", "sambal",
+        "rice vinegar", "mirin", "dashi", "nori", "wonton",
+        "dumpling wrapper", "tofu", "tempeh",
     ],
 }
 

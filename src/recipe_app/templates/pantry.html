@@ -10,19 +10,38 @@
   </div>
 </section>
 
-{# Quick add #}
+{# Add pantry item form #}
 <section class="add-item-section">
   <form method="post" action="/pantry/add"
         hx-post="/pantry/add"
         hx-target="#pantry-list"
         hx-swap="innerHTML"
-        class="inline-create-form">
-    <input type="text" name="name" placeholder="Add pantry item..." required class="input" style="flex: 1;"
-           autocomplete="off">
-    <input type="date" name="expiration_date" class="input" style="width: auto;"
-           title="Expiration date (optional)">
-    <button type="submit" class="btn btn-primary">Add</button>
+        class="pantry-add-form">
+    <div class="form-row">
+      <input type="text" name="name" placeholder="Item name..." required class="input" style="flex: 2;"
+             autocomplete="off">
+      <input type="number" name="quantity" placeholder="Qty" class="input" style="width: 5rem;" step="any" min="0">
+      <input type="text" name="unit" placeholder="Unit" class="input" style="width: 5rem;"
+             list="unit-suggestions">
+    </div>
+    <div class="form-row">
+      <input type="text" name="category" placeholder="Category (optional)" class="input" style="flex: 1;"
+             list="category-suggestions">
+      <input type="date" name="expiration_date" class="input" style="width: auto;"
+             title="Expiration date (optional)">
+      <button type="submit" class="btn btn-primary">Add</button>
+    </div>
   </form>
+  <datalist id="unit-suggestions">
+    {% for u in ["oz", "lb", "g", "kg", "cup", "tbsp", "tsp", "ml", "L", "qt", "gal", "pint", "piece", "can", "bag", "bottle", "box", "bunch", "head", "clove", "slice"] %}
+      <option value="{{ u }}">
+    {% endfor %}
+  </datalist>
+  <datalist id="category-suggestions">
+    {% for cat in categories %}
+      <option value="{{ cat }}">
+    {% endfor %}
+  </datalist>
 </section>
 
 {# Pantry items list #}

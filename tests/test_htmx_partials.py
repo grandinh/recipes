@@ -39,11 +39,10 @@ async def test_pantry_delete_htmx(client, create_pantry_item):
     assert "To Remove" not in resp.text
 
 
-async def test_meal_plan_add_recipe_htmx(client, create_recipe, create_meal_plan):
+async def test_calendar_add_recipe_htmx(client, create_recipe):
     recipe = await create_recipe()
-    plan = await create_meal_plan()
     resp = await client.post(
-        f"/meal-plans/{plan['id']}/add-recipe",
+        "/calendar/add-recipe",
         data={
             "recipe_id": str(recipe["id"]),
             "date": "2026-03-25",
@@ -57,18 +56,12 @@ async def test_meal_plan_add_recipe_htmx(client, create_recipe, create_meal_plan
     assert recipe["title"] in resp.text
 
 
-async def test_grocery_add_item_htmx(client, create_recipe):
-    r = await create_recipe(ingredients=["1 egg"])
-    gl = await client.post(
-        "/api/grocery-lists/generate", json={"recipe_ids": [r["id"]]}
-    )
-    list_id = gl.json()["id"]
+async def test_grocery_add_item_htmx(client):
     resp = await client.post(
-        f"/grocery-lists/{list_id}/add-item",
+        "/grocery/add-item",
         data={"text": "Extra butter"},
         headers=HTMX_HEADERS,
     )
-    # Template rendering may fail — document actual behavior
-    assert resp.status_code in (200, 500)
-    if resp.status_code == 500:
-        assert "Traceback" not in resp.text
+    assert resp.status_code == 200
+    assert "<html" not in resp.text
+    assert "Extra butter" in resp.text

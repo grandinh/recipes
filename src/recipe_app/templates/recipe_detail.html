@@ -31,7 +31,7 @@
         Start Cooking
       </button>
       {% if recipe.ingredients %}
-      <form method="post" action="/recipes/{{ recipe.id }}/add-to-grocery-list" class="inline-form">
+      <form method="post" action="/grocery/add-from-recipe/{{ recipe.id }}" class="inline-form">
         <button type="submit" class="btn btn-secondary">Add to Grocery List</button>
       </form>
       {% endif %}

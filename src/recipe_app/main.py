@@ -18,11 +18,10 @@ from recipe_app.db import (
     lifespan, get_db, list_recipes, get_recipe, create_recipe,
     update_recipe, delete_recipe, search_recipes, list_categories,
     toggle_favorite, set_rating,
-    list_meal_plans, get_meal_plan, create_meal_plan, add_meal_plan_entry,
-    remove_meal_plan_entry, delete_meal_plan,
-    get_meal_plan_week, list_recipe_titles,
-    list_grocery_lists, get_grocery_list, generate_grocery_list,
-    check_grocery_item, add_grocery_item, delete_grocery_list,
+    add_calendar_entry, get_calendar_week, remove_calendar_entry,
+    list_recipe_titles,
+    get_grocery_list, generate_grocery_list,
+    check_grocery_item, add_grocery_item,
     delete_grocery_item, clear_checked_grocery_items, move_checked_to_pantry,
     add_recipe_to_grocery_list,
     list_pantry_items, add_pantry_item, delete_pantry_item,
@@ -33,7 +32,7 @@ from recipe_app.paprika_import import (
     parse_paprika_archive, import_paprika_recipes,
 )
 from recipe_app.photos import save_photo, delete_photo
-from recipe_app.routers import recipes, categories, search, meal_plans, pantry
+from recipe_app.routers import recipes, categories, search, grocery, pantry, calendar
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,8 @@ app.add_middleware(CSPMiddleware)
 app.include_router(recipes.router)
 app.include_router(categories.router)
 app.include_router(search.router)
-app.include_router(meal_plans.router)
+app.include_router(grocery.router)
+app.include_router(calendar.router)
 app.include_router(pantry.router)
 
 # Static files and templates
@@ -179,22 +179,14 @@ async def edit_recipe_form(request: Request, recipe_id: int):
     })
 
 
-# --- Meal Plans web UI ---
-
-@app.get("/meal-plans", response_class=HTMLResponse)
-async def meal_plans_page(request: Request):
-    db = get_db(request)
-    plans = await list_meal_plans(db)
-    return templates.TemplateResponse(request, "meal_plans.html", {"plans": plans})
-
+# --- Calendar web UI ---
 
 MEAL_SLOTS = ["breakfast", "lunch", "dinner", "snack"]
 
 
-@app.get("/meal-plans/{plan_id}", response_class=HTMLResponse)
-async def meal_plan_detail_page(
+@app.get("/calendar", response_class=HTMLResponse)
+async def calendar_page(
     request: Request,
-    plan_id: int,
     week: str | None = None,
     hx_request: Annotated[str | None, Header()] = None,
 ):
@@ -210,77 +202,62 @@ async def meal_plan_detail_page(
         week_date = date.today()
 
     block_name = "calendar_grid" if hx_request else None
-    return await _render_calendar_grid(request, db, plan_id, week_date, block_name=block_name)
+    return await _render_calendar_grid(request, db, week_date, block_name=block_name)
 
 
-@app.post("/meal-plans")
-async def create_meal_plan_submit(request: Request):
-    form = await request.form()
-    db = get_db(request)
-    name = form.get("name", "New Meal Plan")
-    plan = await create_meal_plan(db, name)
-    return RedirectResponse(f"/meal-plans/{plan['id']}", status_code=303)
-
-
-@app.post("/meal-plans/{plan_id}/add-recipe")
-async def add_recipe_to_plan_submit(
-    request: Request, plan_id: int,
+@app.post("/calendar/add-recipe")
+async def add_recipe_to_calendar_submit(
+    request: Request,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     form = await request.form()
     db = get_db(request)
-    entry_date = form.get("date", "")
+    entry_date_str = form.get("date", "")
     meal_slot = form.get("meal_slot", "")
 
     # Validate meal_slot
     if meal_slot not in MEAL_SLOTS:
         return HTMLResponse("Invalid meal slot", status_code=400)
 
-    await add_meal_plan_entry(
-        db, plan_id,
-        recipe_id=int(form.get("recipe_id")),
-        date=entry_date,
+    # Validate date format
+    try:
+        entry_date = date.fromisoformat(entry_date_str)
+    except ValueError:
+        return HTMLResponse("Invalid date format", status_code=400)
+
+    # Validate recipe_id
+    try:
+        recipe_id = int(form.get("recipe_id", ""))
+    except (ValueError, TypeError):
+        return HTMLResponse("Invalid recipe selection", status_code=400)
+
+    await add_calendar_entry(
+        db,
+        recipe_id=recipe_id,
+        date=entry_date_str,
         meal_slot=meal_slot,
     )
     if hx_request:
-        # Re-render the calendar grid for the week containing the added entry
-        try:
-            entry_d = date.fromisoformat(entry_date)
-        except ValueError:
-            entry_d = date.today()
-        return await _render_calendar_grid(request, db, plan_id, entry_d)
-    return RedirectResponse(f"/meal-plans/{plan_id}", status_code=303)
+        return await _render_calendar_grid(request, db, entry_date)
+    return RedirectResponse("/calendar", status_code=303)
 
 
-@app.post("/meal-plans/{plan_id}/entries/{entry_id}/remove")
-async def remove_entry_submit(
-    request: Request, plan_id: int, entry_id: int,
+@app.post("/calendar/entries/{entry_id}/remove")
+async def remove_calendar_entry_submit(
+    request: Request, entry_id: int,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     form = await request.form()
     db = get_db(request)
-    await remove_meal_plan_entry(db, entry_id)
+    await remove_calendar_entry(db, entry_id)
     if hx_request:
         week_str = form.get("week_start", "")
         try:
             week_date = date.fromisoformat(week_str)
         except ValueError:
             week_date = date.today()
-        return await _render_calendar_grid(request, db, plan_id, week_date)
-    # Validate referer to prevent open redirect
-    from urllib.parse import urlparse
-    referer = request.headers.get("referer", "/meal-plans")
-    parsed = urlparse(referer)
-    if parsed.netloc:  # external URL — redirect to safe default
-        referer = "/meal-plans"
-    return RedirectResponse(referer, status_code=303)
-
-
-@app.post("/meal-plans/{plan_id}/delete")
-async def delete_meal_plan_submit(request: Request, plan_id: int):
-    db = get_db(request)
-    await delete_meal_plan(db, plan_id)
-    return RedirectResponse("/meal-plans", status_code=303)
+        return await _render_calendar_grid(request, db, week_date)
+    return RedirectResponse("/calendar", status_code=303)
 
 
 # --- Paprika Import web UI ---
@@ -389,29 +366,25 @@ async def import_status(request: Request, task_id: str):
 async def _render_calendar_grid(
     request: Request,
     db: "aiosqlite.Connection",
-    plan_id: int,
     ref_date: date,
     block_name: str | None = "calendar_grid",
 ) -> HTMLResponse:
-    """Render the meal plan calendar (full page or just the grid block)."""
+    """Render the global calendar (full page or just the grid block)."""
     week_start = ref_date - timedelta(days=ref_date.weekday())
     week_end = week_start + timedelta(days=6)
 
-    plan = await get_meal_plan_week(db, plan_id, week_start.isoformat(), week_end.isoformat())
-    if plan is None:
-        return HTMLResponse("Meal plan not found", status_code=404)
+    calendar_data = await get_calendar_week(db, week_start.isoformat(), week_end.isoformat())
 
     # Only load recipe titles for full-page render (dropdown is outside the grid block)
     all_recipes = await list_recipe_titles(db) if block_name is None else []
     days = [week_start + timedelta(days=i) for i in range(7)]
 
     entries_by_cell: dict[tuple[str, str], list[dict]] = {}
-    for entry in plan.get("entries", []):
+    for entry in calendar_data.get("entries", []):
         key = (entry["date"], entry["meal_slot"])
         entries_by_cell.setdefault(key, []).append(entry)
 
     context = {
-        "plan": plan,
         "all_recipes": all_recipes,
         "days": days,
         "week_start": week_start,
@@ -421,61 +394,75 @@ async def _render_calendar_grid(
         "entries_by_cell": entries_by_cell,
         "today": date.today(),
         "meal_slots": MEAL_SLOTS,
+        "has_entries": len(calendar_data.get("entries", [])) > 0,
     }
     return templates.TemplateResponse(
-        request, "meal_plan_detail.html", context,
+        request, "calendar.html", context,
         block_name=block_name,
     )
 
 
-# --- Grocery Lists web UI ---
+# --- Grocery List web UI (single global list) ---
 
 def _build_aisle_groups(glist: dict) -> list[tuple[str, list[dict]]]:
     """Group grocery list items by aisle for template rendering."""
     aisle_groups: list[tuple[str, list[dict]]] = []
-    aisle_map: dict[str, list[dict]] = {}
+    aisle_map_local: dict[str, list[dict]] = {}
     for item in glist.get("items", []):
         aisle = item.get("aisle") or "Other"
-        if aisle not in aisle_map:
-            aisle_map[aisle] = []
-            aisle_groups.append((aisle, aisle_map[aisle]))
-        aisle_map[aisle].append(item)
+        if aisle not in aisle_map_local:
+            aisle_map_local[aisle] = []
+            aisle_groups.append((aisle, aisle_map_local[aisle]))
+        aisle_map_local[aisle].append(item)
     return aisle_groups
 
 
-@app.get("/grocery-lists", response_class=HTMLResponse)
-async def grocery_lists_page(request: Request):
+@app.get("/grocery", response_class=HTMLResponse)
+async def grocery_page(
+    request: Request,
+    flash: str | None = None,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    from recipe_app.aisle_map import _AISLE_DATA
     db = get_db(request)
-    lists = await list_grocery_lists(db)
-    return templates.TemplateResponse(request, "grocery_lists.html", {"lists": lists})
-
-
-@app.get("/grocery-lists/{list_id}", response_class=HTMLResponse)
-async def grocery_list_detail_page(request: Request, list_id: int):
-    db = get_db(request)
-    glist = await get_grocery_list(db, list_id)
-    if glist is None:
-        return HTMLResponse("Grocery list not found", status_code=404)
+    glist = await get_grocery_list(db)
     aisle_groups = _build_aisle_groups(glist)
-    return templates.TemplateResponse(request, "grocery_list_detail.html", {
+    aisle_names = sorted({name for (name, _) in _AISLE_DATA.keys()})
+    context = {
         "glist": glist,
         "aisle_groups": aisle_groups,
-    })
+        "aisle_names": aisle_names,
+        "flash_message": flash,
+    }
+    block_name = "items_list" if hx_request else None
+    return templates.TemplateResponse(request, "grocery.html", context, block_name=block_name)
 
 
-@app.post("/grocery-lists/generate")
-async def generate_grocery_list_submit(request: Request):
+@app.post("/grocery/add-item")
+async def add_item_submit(
+    request: Request,
+    hx_request: Annotated[str | None, Header()] = None,
+):
     form = await request.form()
     db = get_db(request)
-    plan_id = int(form.get("meal_plan_id")) if form.get("meal_plan_id") else None
-    name = form.get("name") or None
-    glist = await generate_grocery_list(db, name=name, meal_plan_id=plan_id)
-    return RedirectResponse(f"/grocery-lists/{glist['id']}", status_code=303)
+    text = form.get("text", "").strip()
+    aisle = form.get("aisle", "").strip() or None
+    if text:
+        await add_grocery_item(db, text, aisle=aisle)
+    if hx_request:
+        glist = await get_grocery_list(db)
+        aisle_groups = _build_aisle_groups(glist)
+        return templates.TemplateResponse(
+            request, "grocery.html",
+            {"glist": glist, "aisle_groups": aisle_groups},
+            block_name="items_list",
+        )
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/grocery-lists/{list_id}/check/{item_id}")
+@app.post("/grocery/check/{item_id}")
 async def check_item_submit(
-    request: Request, list_id: int, item_id: int,
+    request: Request, item_id: int,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     form = await request.form()
@@ -484,117 +471,107 @@ async def check_item_submit(
     item = await check_grocery_item(db, item_id, is_checked)
     if hx_request and item:
         return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
-            {"item": item, "glist": {"id": list_id}},
+            request, "grocery.html",
+            {"item": item, "glist": {}},
             block_name="grocery_item",
         )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/grocery-lists/{list_id}/add-item")
-async def add_item_submit(
-    request: Request, list_id: int,
-    hx_request: Annotated[str | None, Header()] = None,
-):
-    form = await request.form()
-    db = get_db(request)
-    text = form.get("text", "").strip()
-    if text:
-        await add_grocery_item(db, list_id, text)
-    if hx_request:
-        glist = await get_grocery_list(db, list_id)
-        aisle_groups = _build_aisle_groups(glist)
-        return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
-            {"glist": glist, "aisle_groups": aisle_groups},
-            block_name="items_list",
-        )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
-
-
-@app.post("/grocery-lists/{list_id}/delete")
-async def delete_grocery_list_submit(request: Request, list_id: int):
-    db = get_db(request)
-    await delete_grocery_list(db, list_id)
-    return RedirectResponse("/grocery-lists", status_code=303)
-
-
-@app.post("/grocery-lists/{list_id}/delete-item/{item_id}")
+@app.post("/grocery/delete-item/{item_id}")
 async def delete_grocery_item_submit(
-    request: Request, list_id: int, item_id: int,
+    request: Request, item_id: int,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     db = get_db(request)
     await delete_grocery_item(db, item_id)
     if hx_request:
-        glist = await get_grocery_list(db, list_id)
+        glist = await get_grocery_list(db)
         aisle_groups = _build_aisle_groups(glist)
         return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
+            request, "grocery.html",
             {"glist": glist, "aisle_groups": aisle_groups},
             block_name="items_list",
         )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/grocery-lists/{list_id}/clear-checked")
+@app.post("/grocery/clear-checked")
 async def clear_checked_submit(
-    request: Request, list_id: int,
+    request: Request,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     db = get_db(request)
-    await clear_checked_grocery_items(db, list_id)
+    await clear_checked_grocery_items(db)
     if hx_request:
-        glist = await get_grocery_list(db, list_id)
+        glist = await get_grocery_list(db)
         aisle_groups = _build_aisle_groups(glist)
         return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
+            request, "grocery.html",
             {"glist": glist, "aisle_groups": aisle_groups},
             block_name="items_list",
         )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/grocery-lists/{list_id}/move-to-pantry")
+@app.post("/grocery/move-to-pantry")
 async def move_to_pantry_submit(
-    request: Request, list_id: int,
+    request: Request,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     db = get_db(request)
-    result = await move_checked_to_pantry(db, list_id)
-    if result is None:
-        return HTMLResponse("Grocery list not found", status_code=404)
+    result = await move_checked_to_pantry(db)
     if hx_request:
-        glist = await get_grocery_list(db, list_id)
+        glist = await get_grocery_list(db)
         aisle_groups = _build_aisle_groups(glist)
         return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
+            request, "grocery.html",
             {"glist": glist, "aisle_groups": aisle_groups,
              "move_result": result},
             block_name="items_list",
         )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/recipes/{recipe_id}/add-to-grocery-list")
-async def add_recipe_to_grocery_list_submit(request: Request, recipe_id: int):
+@app.post("/grocery/add-from-recipe/{recipe_id}")
+async def add_from_recipe_submit(request: Request, recipe_id: int):
     db = get_db(request)
     try:
-        glist = await add_recipe_to_grocery_list(db, recipe_id)
+        result = await add_recipe_to_grocery_list(db, recipe_id)
     except ValueError:
         return HTMLResponse("Recipe not found", status_code=404)
-    return RedirectResponse(f"/grocery-lists/{glist['id']}", status_code=303)
+    flash = f"{result['items_added']} items added to grocery list"
+    return RedirectResponse(f"/grocery?flash={flash}", status_code=303)
+
+
+@app.post("/grocery/add-from-calendar")
+async def add_from_calendar_submit(request: Request):
+    form = await request.form()
+    db = get_db(request)
+    date_start = form.get("date_start") or None
+    date_end = form.get("date_end") or None
+    result = await generate_grocery_list(
+        db, date_start=date_start, date_end=date_end,
+    )
+    flash = f"{result['items_added']} items added to grocery list"
+    return RedirectResponse(f"/grocery?flash={flash}", status_code=303)
 
 
 # --- Pantry web UI ---
 
 def _pantry_context(items: list[dict]) -> dict:
     """Build template context with date strings for expiration highlighting."""
+    from recipe_app.aisle_map import _AISLE_DATA
     today = date.today()
+    # Collect unique categories from pantry items + aisle names for datalist
+    pantry_cats = sorted({item["category"] for item in items if item.get("category")})
+    aisle_names = sorted({name for (name, _) in _AISLE_DATA.keys()})
+    categories = sorted(set(pantry_cats + aisle_names))
     return {
         "items": items,
         "now": today.isoformat(),
         "now_plus_7": (today + timedelta(days=7)).isoformat(),
+        "categories": categories,
     }
 
 
@@ -614,8 +591,18 @@ async def add_pantry_submit(
     db = get_db(request)
     name = form.get("name", "").strip()
     expiration_date = form.get("expiration_date", "").strip() or None
+    quantity_str = form.get("quantity", "").strip()
+    try:
+        quantity = float(quantity_str) if quantity_str else None
+    except ValueError:
+        quantity = None
+    unit = form.get("unit", "").strip() or None
+    category = form.get("category", "").strip() or None
     if name:
-        await add_pantry_item(db, name, expiration_date=expiration_date)
+        await add_pantry_item(
+            db, name, expiration_date=expiration_date,
+            quantity=quantity, unit=unit, category=category,
+        )
     if hx_request:
         items = await list_pantry_items(db)
         return templates.TemplateResponse(

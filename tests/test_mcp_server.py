@@ -40,6 +40,9 @@ async def mcp_client(tmp_path, monkeypatch):
     if mcp_mod._db is not None:
         await mcp_mod._db.close()
     mcp_mod._db = None
+    # Reset cached global grocery list ID (each test gets a fresh DB)
+    import recipe_app.db as db_mod
+    db_mod._cached_global_list_id = None
     async with Client(mcp) as client:
         yield client
     if mcp_mod._db is not None:
@@ -58,7 +61,7 @@ async def test_mcp_list_tools(mcp_client):
     assert "search_recipes" in tool_names
     assert "create_recipe" in tool_names
     assert "find_recipes_from_pantry" in tool_names
-    assert len(tool_names) >= 28
+    assert len(tool_names) >= 24
 
 
 # ---------------------------------------------------------------------------
@@ -206,159 +209,162 @@ async def test_mcp_scale_recipe_no_ingredients(mcp_client):
 
 
 # ---------------------------------------------------------------------------
-# Meal Plans
+# Calendar
 # ---------------------------------------------------------------------------
 
 
-async def test_mcp_create_meal_plan(mcp_client):
-    result = await mcp_client.call_tool(
-        "create_meal_plan", {"name": "MCP Plan"}
-    )
-    data = _parse_result(result)
-    assert data["name"] == "MCP Plan"
-    assert "id" in data
-
-
-async def test_mcp_get_meal_plan(mcp_client):
-    create_result = await mcp_client.call_tool(
-        "create_meal_plan", {"name": "Get Plan"}
-    )
-    plan_id = _parse_result(create_result)["id"]
-
-    result = await mcp_client.call_tool("get_meal_plan", {"plan_id": plan_id})
-    data = _parse_result(result)
-    assert data["id"] == plan_id
-    assert data["name"] == "Get Plan"
-    assert "entries" in data
-
-
-async def test_mcp_update_meal_plan(mcp_client):
-    create_result = await mcp_client.call_tool(
-        "create_meal_plan", {"name": "Old Name"}
-    )
-    plan_id = _parse_result(create_result)["id"]
-
-    result = await mcp_client.call_tool(
-        "update_meal_plan", {"plan_id": plan_id, "name": "New Name"}
-    )
-    data = _parse_result(result)
-    assert data["id"] == plan_id
-    assert data["name"] == "New Name"
-
-
-async def test_mcp_list_meal_plans(mcp_client):
-    await mcp_client.call_tool("create_meal_plan", {"name": "Plan A"})
-    result = await mcp_client.call_tool("list_meal_plans", {})
-    data = _parse_result(result)
-    assert isinstance(data, list)
-    assert len(data) >= 1
-    names = [p["name"] for p in data]
-    assert "Plan A" in names
-
-
-async def test_mcp_delete_meal_plan(mcp_client):
-    create_result = await mcp_client.call_tool(
-        "create_meal_plan", {"name": "Delete Me"}
-    )
-    plan_id = _parse_result(create_result)["id"]
-
-    result = await mcp_client.call_tool("delete_meal_plan", {"plan_id": plan_id})
-    data = _parse_result(result)
-    assert "deleted" in data.lower()
-
-
-async def test_mcp_add_and_remove_recipe_from_meal_plan(mcp_client):
-    """Add a recipe to a meal plan, then remove the entry."""
+async def test_mcp_add_to_calendar(mcp_client):
     recipe_result = await mcp_client.call_tool(
-        "create_recipe", {"title": "Plan Recipe"}
+        "create_recipe", {"title": "Calendar Recipe"}
     )
     recipe_id = _parse_result(recipe_result)["id"]
 
-    plan_result = await mcp_client.call_tool(
-        "create_meal_plan", {"name": "Entry Plan"}
+    result = await mcp_client.call_tool(
+        "add_to_calendar",
+        {"recipe_id": recipe_id, "date": "2026-03-25", "meal_slot": "dinner"},
     )
-    plan_id = _parse_result(plan_result)["id"]
+    data = _parse_result(result)
+    assert data["recipe_id"] == recipe_id
+    assert data["recipe_title"] == "Calendar Recipe"
+    assert data["meal_slot"] == "dinner"
+    assert "id" in data
 
-    entry_result = await mcp_client.call_tool(
-        "add_recipe_to_meal_plan",
+
+async def test_mcp_get_calendar_week(mcp_client):
+    recipe_result = await mcp_client.call_tool(
+        "create_recipe", {"title": "Week Recipe"}
+    )
+    recipe_id = _parse_result(recipe_result)["id"]
+
+    await mcp_client.call_tool(
+        "add_to_calendar",
+        {"recipe_id": recipe_id, "date": "2026-03-25", "meal_slot": "dinner"},
+    )
+
+    result = await mcp_client.call_tool(
+        "get_calendar_week", {"date": "2026-03-25"}
+    )
+    data = _parse_result(result)
+    assert "entries" in data
+    assert len(data["entries"]) >= 1
+
+
+async def test_mcp_add_to_calendar_batch(mcp_client):
+    recipe_result = await mcp_client.call_tool(
+        "create_recipe", {"title": "Batch Recipe"}
+    )
+    recipe_id = _parse_result(recipe_result)["id"]
+
+    result = await mcp_client.call_tool(
+        "add_to_calendar_batch",
         {
-            "plan_id": plan_id,
-            "recipe_id": recipe_id,
-            "date": "2026-03-25",
-            "meal_slot": "dinner",
+            "entries": [
+                {"recipe_id": recipe_id, "date": "2026-03-25", "meal_slot": "breakfast"},
+                {"recipe_id": recipe_id, "date": "2026-03-26", "meal_slot": "lunch"},
+            ]
         },
     )
-    entry_data = _parse_result(entry_result)
-    assert entry_data["recipe_id"] == recipe_id
-    entry_id = entry_data["id"]
+    data = _parse_result(result)
+    assert isinstance(data, list)
+    assert len(data) == 2
 
-    # Remove the entry
+
+async def test_mcp_remove_from_calendar(mcp_client):
+    """Add a recipe to calendar, then remove it."""
+    recipe_result = await mcp_client.call_tool(
+        "create_recipe", {"title": "Remove Recipe"}
+    )
+    recipe_id = _parse_result(recipe_result)["id"]
+
+    entry_result = await mcp_client.call_tool(
+        "add_to_calendar",
+        {"recipe_id": recipe_id, "date": "2026-03-25", "meal_slot": "dinner"},
+    )
+    entry_id = _parse_result(entry_result)["id"]
+
     remove_result = await mcp_client.call_tool(
-        "remove_recipe_from_meal_plan", {"entry_id": entry_id}
+        "remove_from_calendar", {"entry_id": entry_id}
     )
     remove_data = _parse_result(remove_result)
     assert "removed" in remove_data.lower()
 
-    # Verify plan is now empty
-    plan_data = _parse_result(
-        await mcp_client.call_tool("get_meal_plan", {"plan_id": plan_id})
+    # Verify calendar is now empty for that week
+    week_data = _parse_result(
+        await mcp_client.call_tool("get_calendar_week", {"date": "2026-03-25"})
     )
-    assert len(plan_data["entries"]) == 0
+    assert len(week_data["entries"]) == 0
 
 
 # ---------------------------------------------------------------------------
-# Grocery Lists
+# Grocery List (single global list)
 # ---------------------------------------------------------------------------
 
 
-async def test_mcp_generate_grocery_list(mcp_client):
+async def test_mcp_get_grocery_list(mcp_client):
+    """Global list starts empty."""
+    result = await mcp_client.call_tool("get_grocery_list", {})
+    data = _parse_result(result)
+    assert "items" in data
+    assert isinstance(data["items"], list)
+
+
+async def test_mcp_add_grocery_item(mcp_client):
+    result = await mcp_client.call_tool(
+        "add_grocery_item", {"name": "Butter"}
+    )
+    data = _parse_result(result)
+    assert data["text"] == "Butter"
+    assert data["aisle"] is not None
+
+
+async def test_mcp_add_recipe_to_grocery_list(mcp_client):
     create_result = await mcp_client.call_tool(
         "create_recipe",
-        {"title": "GL Recipe", "ingredients": ["2 cups flour"]},
+        {"title": "GL Recipe", "ingredients": ["2 cups flour", "1 egg"]},
     )
     recipe_id = _parse_result(create_result)["id"]
 
     result = await mcp_client.call_tool(
-        "generate_grocery_list", {"recipe_ids": [recipe_id], "name": "MCP List"}
+        "add_recipe_to_grocery_list", {"recipe_id": recipe_id}
     )
     data = _parse_result(result)
-    assert data["name"] == "MCP List"
-    assert "items" in data
+    assert data["items_added"] >= 1
+    assert data["recipe_title"] == "GL Recipe"
 
 
-async def test_mcp_get_grocery_list(mcp_client):
+async def test_mcp_preview_grocery_additions(mcp_client):
     create_result = await mcp_client.call_tool(
         "create_recipe",
-        {"title": "GL Get Recipe", "ingredients": ["1 egg"]},
+        {"title": "Preview Recipe", "ingredients": ["1 egg"]},
     )
     recipe_id = _parse_result(create_result)["id"]
 
-    gen_result = await mcp_client.call_tool(
-        "generate_grocery_list", {"recipe_ids": [recipe_id], "name": "Get List"}
+    result = await mcp_client.call_tool(
+        "preview_grocery_additions", {"recipe_id": recipe_id}
     )
-    list_id = _parse_result(gen_result)["list_id"]
-
-    result = await mcp_client.call_tool("get_grocery_list", {"list_id": list_id})
     data = _parse_result(result)
-    assert data["id"] == list_id
-    assert data["name"] == "Get List"
-    assert "items" in data
+    assert data["recipe_title"] == "Preview Recipe"
     assert len(data["items"]) >= 1
 
 
-async def test_mcp_list_grocery_lists(mcp_client):
+async def test_mcp_generate_grocery_list_from_calendar(mcp_client):
     create_result = await mcp_client.call_tool(
-        "create_recipe", {"title": "R", "ingredients": ["1 egg"]}
+        "create_recipe",
+        {"title": "Cal Recipe", "ingredients": ["2 cups flour"]},
     )
     recipe_id = _parse_result(create_result)["id"]
 
     await mcp_client.call_tool(
-        "generate_grocery_list", {"recipe_ids": [recipe_id]}
+        "add_to_calendar",
+        {"recipe_id": recipe_id, "date": "2026-03-25", "meal_slot": "dinner"},
     )
-    result = await mcp_client.call_tool("list_grocery_lists", {})
+
+    result = await mcp_client.call_tool(
+        "generate_grocery_list_from_calendar",
+        {"start": "2026-03-23", "end": "2026-03-29"},
+    )
     data = _parse_result(result)
-    assert isinstance(data, list)
-    assert len(data) >= 1
+    assert data["items_added"] >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -430,34 +436,28 @@ async def test_mcp_find_recipes_from_pantry_empty(mcp_client):
 
 
 async def test_mcp_recipe_to_grocery_list_flow(mcp_client):
-    """Create recipe -> meal plan -> add entry -> generate grocery list."""
+    """Create recipe -> add to calendar -> generate grocery items."""
     recipe_result = await mcp_client.call_tool(
         "create_recipe",
         {"title": "Flow Recipe", "ingredients": ["2 cups flour", "1 egg"]},
     )
     recipe_id = _parse_result(recipe_result)["id"]
 
-    plan_result = await mcp_client.call_tool(
-        "create_meal_plan", {"name": "Flow Plan"}
-    )
-    plan_id = _parse_result(plan_result)["id"]
-
     await mcp_client.call_tool(
-        "add_recipe_to_meal_plan",
+        "add_to_calendar",
         {
-            "plan_id": plan_id,
             "recipe_id": recipe_id,
             "date": "2026-03-25",
             "meal_slot": "dinner",
         },
     )
     result = await mcp_client.call_tool(
-        "generate_grocery_list", {"meal_plan_id": plan_id, "name": "Flow List"}
+        "generate_grocery_list_from_calendar",
+        {"start": "2026-03-23", "end": "2026-03-29"},
     )
     data = _parse_result(result)
-    assert data["name"] == "Flow List"
+    assert data["items_added"] >= 1
     assert "items" in data
-    assert len(data["items"]) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -470,18 +470,17 @@ async def test_mcp_delete_grocery_item(mcp_client):
         "create_recipe", {"title": "R", "ingredients": ["1 egg"]}
     )
     recipe_id = _parse_result(recipe)["id"]
-    gl = await mcp_client.call_tool(
-        "generate_grocery_list", {"recipe_ids": [recipe_id]}
+    await mcp_client.call_tool(
+        "add_recipe_to_grocery_list", {"recipe_id": recipe_id}
     )
-    list_id = _parse_result(gl)["list_id"]
-    glist = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    glist = _parse_result(await mcp_client.call_tool("get_grocery_list", {}))
     item_id = glist["items"][0]["id"]
 
     result = _parse_result(await mcp_client.call_tool("delete_grocery_item", {"item_id": item_id}))
     assert "deleted" in result.lower()
 
     # Verify item is gone
-    glist2 = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    glist2 = _parse_result(await mcp_client.call_tool("get_grocery_list", {}))
     item_ids = [i["id"] for i in glist2["items"]]
     assert item_id not in item_ids
 
@@ -491,53 +490,46 @@ async def test_mcp_delete_grocery_item_not_found(mcp_client):
     assert "not found" in result.lower()
 
 
-async def test_mcp_clear_checked_grocery_items(mcp_client):
+async def test_mcp_clear_bought_items(mcp_client):
     recipe = await mcp_client.call_tool(
         "create_recipe", {"title": "R", "ingredients": ["1 egg", "2 cups flour"]}
     )
     recipe_id = _parse_result(recipe)["id"]
-    gl = await mcp_client.call_tool(
-        "generate_grocery_list", {"recipe_ids": [recipe_id]}
+    await mcp_client.call_tool(
+        "add_recipe_to_grocery_list", {"recipe_id": recipe_id}
     )
-    list_id = _parse_result(gl)["list_id"]
-    glist = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    glist = _parse_result(await mcp_client.call_tool("get_grocery_list", {}))
     item_id = glist["items"][0]["id"]
 
     # Check one item
     await mcp_client.call_tool("check_grocery_item", {"item_id": item_id, "is_checked": True})
 
     # Clear checked
-    result = _parse_result(await mcp_client.call_tool("clear_checked_grocery_items", {"list_id": list_id}))
+    result = _parse_result(await mcp_client.call_tool("clear_bought_items", {}))
     assert result["cleared_count"] == 1
 
     # Verify one item was removed
-    glist2 = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    glist2 = _parse_result(await mcp_client.call_tool("get_grocery_list", {}))
     assert len(glist2["items"]) == len(glist["items"]) - 1
 
 
-async def test_mcp_clear_checked_list_not_found(mcp_client):
-    result = _parse_result(await mcp_client.call_tool("clear_checked_grocery_items", {"list_id": 99999}))
-    assert "error" in result
-
-
 async def test_mcp_move_checked_to_pantry(mcp_client):
-    """Full workflow: generate grocery list -> check items -> move to pantry."""
+    """Full workflow: add recipe to grocery -> check items -> move to pantry."""
     recipe = await mcp_client.call_tool(
         "create_recipe", {"title": "R", "ingredients": ["1 egg", "2 cups flour"]}
     )
     recipe_id = _parse_result(recipe)["id"]
-    gl = await mcp_client.call_tool(
-        "generate_grocery_list", {"recipe_ids": [recipe_id]}
+    await mcp_client.call_tool(
+        "add_recipe_to_grocery_list", {"recipe_id": recipe_id}
     )
-    list_id = _parse_result(gl)["list_id"]
-    glist = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    glist = _parse_result(await mcp_client.call_tool("get_grocery_list", {}))
 
     # Check all items
     for item in glist["items"]:
         await mcp_client.call_tool("check_grocery_item", {"item_id": item["id"], "is_checked": True})
 
     # Move to pantry
-    result = _parse_result(await mcp_client.call_tool("move_checked_to_pantry", {"list_id": list_id}))
+    result = _parse_result(await mcp_client.call_tool("move_checked_to_pantry", {}))
     assert len(result["moved"]) > 0
     assert isinstance(result["already_in_pantry"], list)
 
@@ -546,13 +538,8 @@ async def test_mcp_move_checked_to_pantry(mcp_client):
     assert len(pantry) > 0
 
     # Verify grocery list is empty
-    glist2 = _parse_result(await mcp_client.call_tool("get_grocery_list", {"list_id": list_id}))
+    glist2 = _parse_result(await mcp_client.call_tool("get_grocery_list", {}))
     assert len(glist2["items"]) == 0
-
-
-async def test_mcp_move_checked_to_pantry_not_found(mcp_client):
-    result = _parse_result(await mcp_client.call_tool("move_checked_to_pantry", {"list_id": 99999}))
-    assert "error" in result
 
 
 # ---------------------------------------------------------------------------
