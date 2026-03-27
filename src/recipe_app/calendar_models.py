@@ -10,7 +10,7 @@ class CalendarEntryCreate(BaseModel):
     """POST payload for adding a recipe to the calendar."""
 
     recipe_id: int
-    date: str
+    date: date
     meal_slot: Literal["breakfast", "lunch", "dinner", "snack"]
 
 
@@ -28,7 +28,7 @@ class GroceryListGenerate(BaseModel):
     date_end: date | None = None
 
     @model_validator(mode="after")
-    def validate_dates(self):
+    def validate_dates(self) -> "GroceryListGenerate":
         if (self.date_start is None) != (self.date_end is None):
             raise ValueError("date_start and date_end must both be provided or both omitted")
         if self.date_start and self.date_end and self.date_start > self.date_end:

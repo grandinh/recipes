@@ -40,6 +40,9 @@ async def mcp_client(tmp_path, monkeypatch):
     if mcp_mod._db is not None:
         await mcp_mod._db.close()
     mcp_mod._db = None
+    # Reset cached global grocery list ID (each test gets a fresh DB)
+    import recipe_app.db as db_mod
+    db_mod._cached_global_list_id = None
     async with Client(mcp) as client:
         yield client
     if mcp_mod._db is not None:

@@ -212,26 +212,33 @@ async def add_recipe_to_calendar_submit(
 ):
     form = await request.form()
     db = get_db(request)
-    entry_date = form.get("date", "")
+    entry_date_str = form.get("date", "")
     meal_slot = form.get("meal_slot", "")
 
     # Validate meal_slot
     if meal_slot not in MEAL_SLOTS:
         return HTMLResponse("Invalid meal slot", status_code=400)
 
+    # Validate date format
+    try:
+        entry_date = date.fromisoformat(entry_date_str)
+    except ValueError:
+        return HTMLResponse("Invalid date format", status_code=400)
+
+    # Validate recipe_id
+    try:
+        recipe_id = int(form.get("recipe_id", ""))
+    except (ValueError, TypeError):
+        return HTMLResponse("Invalid recipe selection", status_code=400)
+
     await add_calendar_entry(
         db,
-        recipe_id=int(form.get("recipe_id")),
-        date=entry_date,
+        recipe_id=recipe_id,
+        date=entry_date_str,
         meal_slot=meal_slot,
     )
     if hx_request:
-        # Re-render the calendar grid for the week containing the added entry
-        try:
-            entry_d = date.fromisoformat(entry_date)
-        except ValueError:
-            entry_d = date.today()
-        return await _render_calendar_grid(request, db, entry_d)
+        return await _render_calendar_grid(request, db, entry_date)
     return RedirectResponse("/calendar", status_code=303)
 
 
@@ -416,12 +423,15 @@ async def grocery_page(
     flash: str | None = None,
     hx_request: Annotated[str | None, Header()] = None,
 ):
+    from recipe_app.aisle_map import _AISLE_DATA
     db = get_db(request)
     glist = await get_grocery_list(db)
     aisle_groups = _build_aisle_groups(glist)
+    aisle_names = sorted({name for (name, _) in _AISLE_DATA.keys()})
     context = {
         "glist": glist,
         "aisle_groups": aisle_groups,
+        "aisle_names": aisle_names,
         "flash_message": flash,
     }
     block_name = "items_list" if hx_request else None
@@ -582,7 +592,10 @@ async def add_pantry_submit(
     name = form.get("name", "").strip()
     expiration_date = form.get("expiration_date", "").strip() or None
     quantity_str = form.get("quantity", "").strip()
-    quantity = float(quantity_str) if quantity_str else None
+    try:
+        quantity = float(quantity_str) if quantity_str else None
+    except ValueError:
+        quantity = None
     unit = form.get("unit", "").strip() or None
     category = form.get("category", "").strip() or None
     if name:

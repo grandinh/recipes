@@ -73,6 +73,9 @@ async def create_recipe(
     rating: int | None = None,
     is_favorite: bool = False,
     base_servings: int | None = None,
+    source_url: str | None = None,
+    image_url: str | None = None,
+    nutritional_info: str | None = None,
 ) -> dict:
     """Add a new recipe. Only title is required. Returns the full created recipe."""
     db = await get_db()
@@ -91,6 +94,9 @@ async def create_recipe(
         rating=rating,
         is_favorite=is_favorite,
         base_servings=base_servings,
+        source_url=source_url,
+        image_url=image_url,
+        nutritional_info=nutritional_info,
     )
     return await db_module.create_recipe(db, data)
 
@@ -142,6 +148,9 @@ async def update_recipe(
     rating: int | None = None,
     is_favorite: bool | None = None,
     base_servings: int | None = None,
+    source_url: str | None = None,
+    image_url: str | None = None,
+    nutritional_info: str | None = None,
 ) -> dict | None:
     """Update any field of an existing recipe. Only provided fields are changed.
     Returns the full updated recipe."""
@@ -155,7 +164,8 @@ async def update_recipe(
         ("servings", servings), ("prep_time_minutes", prep_time_minutes),
         ("cook_time_minutes", cook_time_minutes), ("cuisine", cuisine),
         ("difficulty", difficulty), ("rating", rating), ("is_favorite", is_favorite),
-        ("base_servings", base_servings),
+        ("base_servings", base_servings), ("source_url", source_url),
+        ("image_url", image_url), ("nutritional_info", nutritional_info),
     ]:
         if value is not None:
             kwargs[field] = value
@@ -364,15 +374,18 @@ async def preview_grocery_additions(recipe_id: int) -> dict:
 
 @mcp.tool
 async def generate_grocery_list_from_calendar(
-    start: str,
-    end: str,
+    start: str | None = None,
+    end: str | None = None,
+    recipe_ids: list[int] | None = None,
 ) -> dict:
-    """Generate grocery items from calendar entries in a date range (YYYY-MM-DD)
-    and append them to the global grocery list.
+    """Generate grocery items from calendar entries or specific recipes and append to the global list.
+    Provide either start+end (YYYY-MM-DD date range) or recipe_ids (list of recipe IDs), not both.
     Returns {items_added, pantry_match_count, items}."""
+    if not start and not recipe_ids:
+        return {"error": "Provide start+end date range or recipe_ids"}
     db = await get_db()
     return await db_module.generate_grocery_list(
-        db, date_start=start, date_end=end,
+        db, date_start=start, date_end=end, recipe_ids=recipe_ids,
     )
 
 

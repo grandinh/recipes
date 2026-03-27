@@ -321,9 +321,10 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         db_path = str(settings.database_path)
         backup = f"{db_path}.backup-v{version}-{datetime.now():%Y%m%d%H%M%S}"
         try:
-            await db.execute(f"VACUUM INTO '{backup}'")
+            backup_safe = backup.replace("'", "''")
+            await db.execute(f"VACUUM INTO '{backup_safe}'")
         except Exception:
-            shutil.copy2(db_path, backup)
+            await asyncio.to_thread(shutil.copy2, db_path, backup)
         logger.info("Database backed up to %s before v4 migration", backup)
 
         # Disable FK enforcement for table recreation
@@ -411,7 +412,10 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         """)
 
         # Step 5: Re-enable FK enforcement and verify integrity
-        await db.execute("PRAGMA foreign_key_check")
+        cursor = await db.execute("PRAGMA foreign_key_check")
+        violations = await cursor.fetchall()
+        if violations:
+            raise RuntimeError(f"FK violations after v4 migration: {violations}")
         await db.execute("PRAGMA foreign_keys = ON")
 
         await db.execute("PRAGMA user_version = 4")
@@ -953,25 +957,34 @@ async def list_recipe_titles(db: aiosqlite.Connection) -> list[dict]:
 from recipe_app.aggregation import aggregate_ingredients as _aggregate_ingredients
 
 
+_cached_global_list_id: int | None = None
+
+
 async def _get_global_list_id(db: aiosqlite.Connection) -> int:
-    """Get the single global grocery list ID, creating it if needed."""
+    """Get the single global grocery list ID, creating it if needed. Cached after first call."""
+    global _cached_global_list_id
+    if _cached_global_list_id is not None:
+        return _cached_global_list_id
     cursor = await db.execute("SELECT id FROM grocery_lists LIMIT 1")
     row = await cursor.fetchone()
     if row:
-        return row["id"]
+        _cached_global_list_id = row["id"]
+        return _cached_global_list_id
     # Create the single global list
     async with _write_lock:
         # Double-check inside lock
         cursor = await db.execute("SELECT id FROM grocery_lists LIMIT 1")
         row = await cursor.fetchone()
         if row:
-            return row["id"]
+            _cached_global_list_id = row["id"]
+            return _cached_global_list_id
         cursor = await db.execute(
             "INSERT INTO grocery_lists (name) VALUES (?)",
             ("Grocery List",),
         )
         await db.commit()
-        return cursor.lastrowid
+        _cached_global_list_id = cursor.lastrowid
+        return _cached_global_list_id
 
 
 async def _append_to_grocery_list(
@@ -1025,14 +1038,14 @@ async def _append_to_grocery_list(
 
 
 def _apply_pantry_flags(
-    aggregated: list[dict],
+    items: list[dict],
     pantry_rows: list[dict],
 ) -> None:
-    """Mark items that match pantry items (mutates in place)."""
+    """Mark items that match pantry items via exact normalized name match (mutates in place)."""
     pantry_names = {row["name"].lower() for row in pantry_rows}
-    for item in aggregated:
+    for item in items:
         norm = (item.get("normalized_name") or "").lower()
-        item["in_pantry"] = norm in pantry_names or any(p in norm for p in pantry_names)
+        item["in_pantry"] = norm in pantry_names
 
 
 async def generate_grocery_list(
@@ -1119,10 +1132,7 @@ async def get_grocery_list(db: aiosqlite.Connection) -> dict:
 
     # Add pantry flags
     pantry_rows = await list_pantry_items(db)
-    pantry_names = {row["name"].lower() for row in pantry_rows}
-    for item in items:
-        norm = (item.get("normalized_name") or "").lower()
-        item["in_pantry"] = norm in pantry_names or any(p in norm for p in pantry_names)
+    _apply_pantry_flags(items, pantry_rows)
 
     return {**glist, "items": items}
 

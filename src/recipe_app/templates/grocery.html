@@ -21,21 +21,9 @@
     <input type="text" name="text" placeholder="Add an item..." required class="input" style="flex: 1;">
     <select name="aisle" class="input" style="width: auto;">
       <option value="">Auto-detect aisle</option>
-      <option value="Produce">Produce</option>
-      <option value="Meat &amp; Seafood">Meat &amp; Seafood</option>
-      <option value="Dairy &amp; Eggs">Dairy &amp; Eggs</option>
-      <option value="Bakery">Bakery</option>
-      <option value="Frozen">Frozen</option>
-      <option value="Canned &amp; Jarred">Canned &amp; Jarred</option>
-      <option value="Dry Goods &amp; Pasta">Dry Goods &amp; Pasta</option>
-      <option value="Baking &amp; Spices">Baking &amp; Spices</option>
-      <option value="Condiments &amp; Sauces">Condiments &amp; Sauces</option>
-      <option value="Snacks">Snacks</option>
-      <option value="Beverages">Beverages</option>
-      <option value="Oils &amp; Vinegars">Oils &amp; Vinegars</option>
-      <option value="International">International</option>
-      <option value="Deli">Deli</option>
-      <option value="Health &amp; Personal">Health &amp; Personal</option>
+      {% for name in aisle_names %}
+        <option value="{{ name }}">{{ name }}</option>
+      {% endfor %}
       <option value="Other">Other</option>
     </select>
     <button type="submit" class="btn btn-primary">Add</button>
@@ -135,36 +123,6 @@
         </ul>
       </details>
     {% endfor %}
-  {% elif glist["items"] %}
-    {# Fallback: no aisle_groups (e.g., HTMX partial) — render flat list #}
-    <ul class="grocery-items">
-      {% for item in glist["items"] %}
-        <li class="grocery-item {% if item.is_checked %}checked{% endif %}"
-            id="item-{{ item.id }}">
-          <form method="post" action="/grocery/check/{{ item.id }}"
-                hx-post="/grocery/check/{{ item.id }}"
-                hx-target="#item-{{ item.id }}"
-                hx-swap="outerHTML">
-            <label class="grocery-label">
-              <input type="hidden" name="is_checked" value="{{ '0' if item.is_checked else '1' }}">
-              <input type="checkbox" {% if item.is_checked %}checked{% endif %}
-                     class="grocery-checkbox">
-              <span class="grocery-text {% if item.is_checked %}strikethrough{% endif %}">{{ item.text }}</span>
-              {% if item.in_pantry %}
-                <span class="grocery-pantry-badge">in pantry</span>
-              {% endif %}
-            </label>
-          </form>
-          <button class="btn-icon btn-delete-item"
-                  hx-post="/grocery/delete-item/{{ item.id }}"
-                  hx-target="#items-list"
-                  hx-swap="innerHTML"
-                  hx-confirm="Delete this item?"
-                  hx-disabled-elt="this"
-                  title="Delete item">&times;</button>
-        </li>
-      {% endfor %}
-    </ul>
   {% else %}
     <p class="empty-state">No items yet. Add items above or add from a recipe or your calendar.</p>
   {% endif %}

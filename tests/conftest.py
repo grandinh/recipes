@@ -55,8 +55,12 @@ async def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(settings, "database_path", db_path)
 
+    import recipe_app.db as db_mod
     from recipe_app.db import lifespan
     from recipe_app.main import app
+
+    # Reset cached global list ID between tests (each test gets a fresh DB)
+    db_mod._cached_global_list_id = None
 
     async with lifespan(app):
         transport = ASGITransport(app=app, raise_app_exceptions=False)
