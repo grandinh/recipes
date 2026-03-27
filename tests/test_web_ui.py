@@ -83,29 +83,21 @@ async def test_calendar_page_with_entries(client, create_recipe):
     assert "Calendar Test" in resp.text
 
 
-async def test_grocery_lists_page(client):
-    resp = await client.get("/grocery-lists")
+async def test_grocery_page(client):
+    resp = await client.get("/grocery")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
 
 
-async def test_grocery_list_detail_page(client, create_recipe):
+async def test_grocery_page_with_items(client, create_recipe):
     r = await create_recipe(ingredients=["1 egg"])
-    gl = await client.post(
-        "/api/grocery-lists/generate",
-        json={"recipe_ids": [r["id"]], "name": "Test List"},
+    await client.post(
+        "/api/grocery/generate-from-calendar",
+        json={"recipe_ids": [r["id"]]},
     )
-    list_id = gl.json()["id"]
-    resp = await client.get(f"/grocery-lists/{list_id}")
-    # The template may error on rendering — document actual behavior
-    assert resp.status_code in (200, 500)
-    if resp.status_code == 500:
-        assert "Traceback" not in resp.text
-
-
-async def test_grocery_list_detail_not_found(client):
-    resp = await client.get("/grocery-lists/99999")
-    assert resp.status_code == 404
+    resp = await client.get("/grocery")
+    assert resp.status_code == 200
+    assert "aisle-section" in resp.text
 
 
 async def test_pantry_page(client):

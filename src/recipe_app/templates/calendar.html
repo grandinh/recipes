@@ -6,16 +6,15 @@
 <section class="page-header">
   <h1>Calendar</h1>
   <div class="detail-actions">
-    <a href="/grocery-lists" class="btn btn-secondary">Grocery Lists</a>
+    <a href="/grocery" class="btn btn-secondary">Grocery List</a>
   </div>
 </section>
 
-{# Generate grocery list from this week #}
+{# Add this week's ingredients to the global grocery list #}
 <section class="generate-grocery">
-  <form method="post" action="/grocery-lists/generate" class="inline-create-form">
+  <form method="post" action="/grocery/add-from-calendar" class="inline-create-form">
     <input type="hidden" name="date_start" value="{{ week_start|isodate }}">
     <input type="hidden" name="date_end" value="{{ week_end|isodate }}">
-    <input type="text" name="name" placeholder="Grocery list name..." value="Week of {{ week_start|month_day }} Shopping List" class="input" style="flex: 1;">
     <button type="submit" class="btn btn-primary">Add This Week to Grocery List</button>
   </form>
 </section>

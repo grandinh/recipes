@@ -18,7 +18,7 @@ async def test_foreign_keys_are_enforced(client):
 
 
 async def test_full_calendar_planning_flow(client, create_recipe):
-    """Recipe -> calendar entry -> generate grocery list -> verify items."""
+    """Recipe -> calendar entry -> generate grocery items -> verify items."""
     r1 = await create_recipe(title="Flow Recipe", ingredients=["2 cups flour", "1 egg"])
 
     await client.post(
@@ -31,12 +31,16 @@ async def test_full_calendar_planning_flow(client, create_recipe):
     )
 
     gl_resp = await client.post(
-        "/api/grocery-lists/generate",
-        json={"date_start": "2026-03-23", "date_end": "2026-03-29", "name": "Flow List"},
+        "/api/grocery/generate-from-calendar",
+        json={"date_start": "2026-03-23", "date_end": "2026-03-29"},
     )
     assert gl_resp.status_code == 201
-    gl = gl_resp.json()
-    assert len(gl["items"]) > 0
+    data = gl_resp.json()
+    assert data["items_added"] > 0
+
+    # Verify items are on the global list
+    glist = await client.get("/api/grocery")
+    assert len(glist.json()["items"]) > 0
 
 
 async def test_delete_recipe_cascades_calendar_entries(client, create_recipe):
@@ -62,23 +66,33 @@ async def test_delete_recipe_cascades_calendar_entries(client, create_recipe):
     assert len(cal_data2.json()["entries"]) == 0
 
 
-async def test_delete_grocery_list_cascades_items(client, create_recipe):
-    """ON DELETE CASCADE: list deletion removes all items."""
+async def test_clear_checked_removes_items(client, create_recipe):
+    """Clear checked removes all checked items from the global list."""
     r = await create_recipe(ingredients=["1 egg"])
-    gl = await client.post(
-        "/api/grocery-lists/generate", json={"recipe_ids": [r["id"]]}
+    await client.post(
+        "/api/grocery/generate-from-calendar", json={"recipe_ids": [r["id"]]}
     )
-    gl_id = gl.json()["id"]
     # Add a manual item too
-    await client.post(f"/api/grocery-lists/{gl_id}/items", json={"text": "Butter"})
+    await client.post("/api/grocery/items", json={"text": "Butter"})
 
-    # Delete the list
-    resp = await client.delete(f"/api/grocery-lists/{gl_id}")
-    assert resp.status_code == 204
+    glist = await client.get("/api/grocery")
+    items = glist.json()["items"]
+    assert len(items) >= 2
 
-    # List and items are gone
-    resp2 = await client.get(f"/api/grocery-lists/{gl_id}")
-    assert resp2.status_code == 404
+    # Check all items
+    for item in items:
+        await client.patch(
+            f"/api/grocery/items/{item['id']}", json={"is_checked": True}
+        )
+
+    # Clear checked
+    resp = await client.post("/api/grocery/clear-checked")
+    assert resp.status_code == 200
+    assert resp.json()["cleared_count"] == len(items)
+
+    # List should now be empty
+    glist2 = await client.get("/api/grocery")
+    assert len(glist2.json()["items"]) == 0
 
 
 async def test_pantry_matches_after_adding_items(

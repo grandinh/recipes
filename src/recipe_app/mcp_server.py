@@ -320,52 +320,60 @@ async def remove_from_calendar(entry_id: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Grocery List Tools
+# Grocery List Tools (single global list)
 # ---------------------------------------------------------------------------
 
 @mcp.tool
-async def generate_grocery_list(
-    recipe_ids: list[int] | None = None,
-    name: str | None = None,
-    date_start: str | None = None,
-    date_end: str | None = None,
+async def get_grocery_list() -> dict:
+    """Get the single global grocery list with all items, including
+    is_checked and in_pantry flags on each item."""
+    db = await get_db()
+    return await db_module.get_grocery_list(db)
+
+
+@mcp.tool
+async def add_grocery_item(name: str, aisle: str | None = None) -> dict:
+    """Add a manual item to the global grocery list. Auto-assigns aisle
+    when not provided. Returns the created item."""
+    db = await get_db()
+    return await db_module.add_grocery_item(db, name, aisle=aisle)
+
+
+@mcp.tool
+async def add_recipe_to_grocery_list(recipe_id: int) -> dict:
+    """Add all of a recipe's ingredients to the global grocery list.
+    Ingredients are normalized, assigned aisles, and matched against pantry.
+    Returns {items_added, pantry_match_count, recipe_title}."""
+    db = await get_db()
+    try:
+        return await db_module.add_recipe_to_grocery_list(db, recipe_id)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool
+async def preview_grocery_additions(recipe_id: int) -> dict:
+    """Read-only preview of what would be added from a recipe.
+    Returns items with pantry flags — does not modify the grocery list."""
+    db = await get_db()
+    try:
+        return await db_module.preview_grocery_additions(db, recipe_id)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool
+async def generate_grocery_list_from_calendar(
+    start: str,
+    end: str,
 ) -> dict:
-    """Generate a grocery list from calendar entries (by date range) or a list of recipe IDs.
-    Aggregates ingredients across recipes with smart normalization and aisle grouping.
-    Use date_start/date_end (YYYY-MM-DD) to generate from a week's calendar entries.
-    Returns structured data with items grouped by aisle."""
+    """Generate grocery items from calendar entries in a date range (YYYY-MM-DD)
+    and append them to the global grocery list.
+    Returns {items_added, pantry_match_count, items}."""
     db = await get_db()
-    glist = await db_module.generate_grocery_list(
-        db, name=name, recipe_ids=recipe_ids,
-        date_start=date_start, date_end=date_end,
+    return await db_module.generate_grocery_list(
+        db, date_start=start, date_end=end,
     )
-    # Build structured response with aisle summary
-    items = glist.get("items", [])
-    aisle_summary = {}
-    for item in items:
-        aisle = item.get("aisle", "Other")
-        aisle_summary[aisle] = aisle_summary.get(aisle, 0) + 1
-    return {
-        "list_id": glist["id"],
-        "name": glist["name"],
-        "items": items,
-        "aisle_summary": aisle_summary,
-        "total_items": len(items),
-    }
-
-
-@mcp.tool
-async def get_grocery_list(list_id: int) -> dict | None:
-    """Get a grocery list with all its items."""
-    db = await get_db()
-    return await db_module.get_grocery_list(db, list_id)
-
-
-@mcp.tool
-async def list_grocery_lists() -> list[dict]:
-    """List all grocery lists with item counts."""
-    db = await get_db()
-    return await db_module.list_grocery_lists(db)
 
 
 @mcp.tool
@@ -376,65 +384,28 @@ async def check_grocery_item(item_id: int, is_checked: bool) -> dict | None:
 
 
 @mcp.tool
-async def add_grocery_item(list_id: int, text: str) -> dict:
-    """Add a manual item to a grocery list. Returns the updated list."""
-    db = await get_db()
-    await db_module.add_grocery_item(db, list_id, text)
-    return await db_module.get_grocery_list(db, list_id)
-
-
-@mcp.tool
-async def add_recipe_to_grocery_list(
-    recipe_id: int,
-    list_name: str | None = None,
-) -> dict:
-    """Add a recipe's ingredients (normalized, with aisle assignments) to a new grocery list.
-    If list_name is not provided, the list is named after the recipe.
-    Returns the created grocery list with all items."""
-    db = await get_db()
-    try:
-        return await db_module.add_recipe_to_grocery_list(db, recipe_id, list_name)
-    except ValueError as e:
-        return {"error": str(e)}
-
-
-@mcp.tool
-async def delete_grocery_list(list_id: int) -> str:
-    """Delete a grocery list and all its items."""
-    db = await get_db()
-    deleted = await db_module.delete_grocery_list(db, list_id)
-    return f"Grocery list {list_id} deleted" if deleted else f"Grocery list {list_id} not found"
-
-
-@mcp.tool
 async def delete_grocery_item(item_id: int) -> str:
-    """Delete a single item from a grocery list."""
+    """Delete a single item from the grocery list."""
     db = await get_db()
     deleted = await db_module.delete_grocery_item(db, item_id)
     return f"Item {item_id} deleted" if deleted else f"Item {item_id} not found"
 
 
 @mcp.tool
-async def clear_checked_grocery_items(list_id: int) -> dict:
-    """Remove all checked (purchased) items from a grocery list.
+async def clear_bought_items() -> dict:
+    """Remove all checked (purchased) items from the grocery list.
     Returns the number of items cleared."""
     db = await get_db()
-    result = await db_module.clear_checked_grocery_items(db, list_id)
-    if result is None:
-        return {"error": f"Grocery list {list_id} not found"}
-    return result
+    return await db_module.clear_checked_grocery_items(db)
 
 
 @mcp.tool
-async def move_checked_to_pantry(list_id: int) -> dict:
+async def move_checked_to_pantry() -> dict:
     """Move checked grocery items to the pantry and remove them from the list.
     Items already in the pantry are skipped (no duplicates).
     Returns lists of moved items, already-in-pantry items, and any warnings."""
     db = await get_db()
-    result = await db_module.move_checked_to_pantry(db, list_id)
-    if result is None:
-        return {"error": f"Grocery list {list_id} not found"}
-    return result
+    return await db_module.move_checked_to_pantry(db)
 
 
 # ---------------------------------------------------------------------------

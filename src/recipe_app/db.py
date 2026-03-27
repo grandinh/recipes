@@ -947,67 +947,111 @@ async def list_recipe_titles(db: aiosqlite.Connection) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# CRUD — Grocery Lists
+# CRUD — Grocery Lists (single global list model)
 # ---------------------------------------------------------------------------
 
 from recipe_app.aggregation import aggregate_ingredients as _aggregate_ingredients
 
 
-async def _save_grocery_list(
+async def _get_global_list_id(db: aiosqlite.Connection) -> int:
+    """Get the single global grocery list ID, creating it if needed."""
+    cursor = await db.execute("SELECT id FROM grocery_lists LIMIT 1")
+    row = await cursor.fetchone()
+    if row:
+        return row["id"]
+    # Create the single global list
+    async with _write_lock:
+        # Double-check inside lock
+        cursor = await db.execute("SELECT id FROM grocery_lists LIMIT 1")
+        row = await cursor.fetchone()
+        if row:
+            return row["id"]
+        cursor = await db.execute(
+            "INSERT INTO grocery_lists (name) VALUES (?)",
+            ("Grocery List",),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def _append_to_grocery_list(
     db: aiosqlite.Connection,
-    name: str,
     aggregated: list[dict],
 ) -> int:
-    """Persist a grocery list and its items inside a transaction.
+    """Append items to the global grocery list using executemany().
 
-    Returns the new list ID.
+    Returns the number of items appended.
     """
+    if not aggregated:
+        return 0
+
+    list_id = await _get_global_list_id(db)
+
     async with _write_lock:
         try:
             await db.execute("BEGIN IMMEDIATE")
+            # Query MAX(sort_order) to offset new items
             cursor = await db.execute(
-                "INSERT INTO grocery_lists (name) VALUES (?)",
-                (name,),
+                "SELECT COALESCE(MAX(sort_order), 0) as max_order "
+                "FROM grocery_list_items WHERE grocery_list_id = ?",
+                (list_id,),
             )
-            list_id = cursor.lastrowid
-            for item in aggregated:
-                await db.execute(
-                    """INSERT INTO grocery_list_items
-                       (grocery_list_id, text, sort_order, aisle, recipe_id, normalized_name)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        list_id,
-                        sanitize_field(item["text"]),
-                        item["sort_order"],
-                        sanitize_field(item["aisle"]),
-                        item["recipe_id"],
-                        sanitize_field(item["normalized_name"]) if item["normalized_name"] else None,
-                    ),
+            row = await cursor.fetchone()
+            offset = row["max_order"]
+
+            # Build rows for executemany
+            rows = [
+                (
+                    list_id,
+                    sanitize_field(item["text"]),
+                    offset + item["sort_order"],
+                    sanitize_field(item["aisle"]),
+                    item["recipe_id"],
+                    sanitize_field(item["normalized_name"]) if item["normalized_name"] else None,
                 )
+                for item in aggregated
+            ]
+            await db.executemany(
+                """INSERT INTO grocery_list_items
+                   (grocery_list_id, text, sort_order, aisle, recipe_id, normalized_name)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
             await db.commit()
         except Exception:
             await db.rollback()
             raise
-    return list_id
+    return len(aggregated)
+
+
+def _apply_pantry_flags(
+    aggregated: list[dict],
+    pantry_rows: list[dict],
+) -> None:
+    """Mark items that match pantry items (mutates in place)."""
+    pantry_names = {row["name"].lower() for row in pantry_rows}
+    for item in aggregated:
+        norm = (item.get("normalized_name") or "").lower()
+        item["in_pantry"] = norm in pantry_names or any(p in norm for p in pantry_names)
 
 
 async def generate_grocery_list(
     db: aiosqlite.Connection,
-    name: str | None = None,
     recipe_ids: list[int] | None = None,
     date_start: str | None = None,
     date_end: str | None = None,
 ) -> dict:
-    """Generate a grocery list from calendar entries or a list of recipe IDs.
+    """Generate grocery items from calendar entries or recipe IDs and append
+    them to the global grocery list.
 
     Parses ingredients, normalizes, assigns aisles, and aggregates
     using Fraction arithmetic.  CPU-bound work runs via asyncio.to_thread().
+    Returns {items_added, pantry_match_count, items}.
     """
     # 1. Fetch ingredient data (async, on event loop)
     raw_ingredients: list[tuple[str, int, int | None, int | None]] = []
 
     if date_start and date_end:
-        # Use calendar_entries filtered by date range
         cursor = await db.execute(
             """
             SELECT r.id as recipe_id, r.ingredients, r.base_servings
@@ -1043,17 +1087,26 @@ async def generate_grocery_list(
     # 2. CPU-bound aggregation (off event loop)
     aggregated = await asyncio.to_thread(_aggregate_ingredients, raw_ingredients)
 
-    # 3. DB writes (async, inside write lock + explicit transaction)
-    list_name = sanitize_field(name) if name else "Shopping List"
-    list_id = await _save_grocery_list(db, list_name, aggregated)
-    return await get_grocery_list(db, list_id)
+    # 3. Pantry matching
+    pantry_rows = await list_pantry_items(db)
+    _apply_pantry_flags(aggregated, pantry_rows)
+    pantry_match_count = sum(1 for item in aggregated if item.get("in_pantry"))
+
+    # 4. Append to global list
+    items_added = await _append_to_grocery_list(db, aggregated)
+
+    return {
+        "items_added": items_added,
+        "pantry_match_count": pantry_match_count,
+        "items": aggregated,
+    }
 
 
-async def get_grocery_list(db: aiosqlite.Connection, list_id: int) -> dict | None:
+async def get_grocery_list(db: aiosqlite.Connection) -> dict:
+    """Get the single global grocery list with all items and pantry flags."""
+    list_id = await _get_global_list_id(db)
     cursor = await db.execute("SELECT * FROM grocery_lists WHERE id = ?", (list_id,))
     glist = await cursor.fetchone()
-    if glist is None:
-        return None
     cursor = await db.execute(
         """SELECT gli.*, r.title as recipe_title
              FROM grocery_list_items gli
@@ -1062,29 +1115,16 @@ async def get_grocery_list(db: aiosqlite.Connection, list_id: int) -> dict | Non
             ORDER BY gli.is_checked, gli.sort_order""",
         (list_id,),
     )
-    items = await cursor.fetchall()
+    items = [dict(row) for row in await cursor.fetchall()]
+
+    # Add pantry flags
+    pantry_rows = await list_pantry_items(db)
+    pantry_names = {row["name"].lower() for row in pantry_rows}
+    for item in items:
+        norm = (item.get("normalized_name") or "").lower()
+        item["in_pantry"] = norm in pantry_names or any(p in norm for p in pantry_names)
+
     return {**glist, "items": items}
-
-
-async def list_grocery_lists(db: aiosqlite.Connection) -> list[dict]:
-    cursor = await db.execute(
-        """
-        SELECT gl.*, COUNT(gli.id) as item_count,
-               SUM(CASE WHEN gli.is_checked = 1 THEN 1 ELSE 0 END) as checked_count
-          FROM grocery_lists gl
-          LEFT JOIN grocery_list_items gli ON gli.grocery_list_id = gl.id
-         GROUP BY gl.id
-         ORDER BY gl.created_at DESC
-        """
-    )
-    return await cursor.fetchall()
-
-
-async def delete_grocery_list(db: aiosqlite.Connection, list_id: int) -> bool:
-    async with _write_lock:
-        cursor = await db.execute("DELETE FROM grocery_lists WHERE id = ?", (list_id,))
-        await db.commit()
-    return cursor.rowcount > 0
 
 
 async def check_grocery_item(db: aiosqlite.Connection, item_id: int, is_checked: bool) -> dict | None:
@@ -1099,8 +1139,10 @@ async def check_grocery_item(db: aiosqlite.Connection, item_id: int, is_checked:
 
 
 async def add_grocery_item(
-    db: aiosqlite.Connection, list_id: int, text: str, aisle: str | None = None,
+    db: aiosqlite.Connection, text: str, aisle: str | None = None,
 ) -> dict:
+    """Add a manual item to the global grocery list."""
+    list_id = await _get_global_list_id(db)
     text = sanitize_field(text)
     if aisle is not None:
         aisle = sanitize_field(aisle)
@@ -1108,13 +1150,13 @@ async def add_grocery_item(
         from recipe_app.aisle_map import assign_aisle
         aisle = assign_aisle(text)[0]
     async with _write_lock:
-        # Get max sort_order inside lock to prevent race condition
         cursor = await db.execute(
-            "SELECT MAX(sort_order) as max_order FROM grocery_list_items WHERE grocery_list_id = ?",
+            "SELECT COALESCE(MAX(sort_order), 0) as max_order "
+            "FROM grocery_list_items WHERE grocery_list_id = ?",
             (list_id,),
         )
         row = await cursor.fetchone()
-        next_order = (row["max_order"] or 0) + 1
+        next_order = row["max_order"] + 1
 
         cursor = await db.execute(
             "INSERT INTO grocery_list_items (grocery_list_id, text, sort_order, aisle) VALUES (?, ?, ?, ?)",
@@ -1138,34 +1180,24 @@ async def delete_grocery_item(db: aiosqlite.Connection, item_id: int) -> bool:
         return row is not None
 
 
-async def clear_checked_grocery_items(db: aiosqlite.Connection, list_id: int) -> dict | None:
-    """Delete all checked items from a grocery list. Returns None if list not found."""
+async def clear_checked_grocery_items(db: aiosqlite.Connection) -> dict:
+    """Delete all checked items from the global grocery list."""
+    list_id = await _get_global_list_id(db)
     async with _write_lock:
-        cursor = await db.execute(
-            "SELECT id FROM grocery_lists WHERE id = ?", (list_id,),
-        )
-        if not await cursor.fetchone():
-            return None
         cursor = await db.execute(
             "DELETE FROM grocery_list_items WHERE grocery_list_id = ? AND is_checked = 1",
             (list_id,),
         )
         await db.commit()
-        return {"list_id": list_id, "cleared_count": cursor.rowcount}
+        return {"cleared_count": cursor.rowcount}
 
 
-async def move_checked_to_pantry(db: aiosqlite.Connection, list_id: int) -> dict | None:
-    """Move checked grocery items to pantry (name-only). Returns None if list not found."""
+async def move_checked_to_pantry(db: aiosqlite.Connection) -> dict:
+    """Move checked grocery items to pantry (name-only) from the global list."""
+    list_id = await _get_global_list_id(db)
     async with _write_lock:
         try:
             await db.execute("BEGIN IMMEDIATE")
-
-            cursor = await db.execute(
-                "SELECT id FROM grocery_lists WHERE id = ?", (list_id,),
-            )
-            if not await cursor.fetchone():
-                await db.commit()
-                return None
 
             cursor = await db.execute(
                 "SELECT id, text, normalized_name, aisle FROM grocery_list_items "
@@ -1220,18 +1252,17 @@ async def move_checked_to_pantry(db: aiosqlite.Connection, list_id: int) -> dict
 async def add_recipe_to_grocery_list(
     db: aiosqlite.Connection,
     recipe_id: int,
-    list_name: str | None = None,
 ) -> dict:
-    """Create a new grocery list from a single recipe's ingredients.
+    """Add a recipe's ingredients to the global grocery list.
 
-    Normalizes and assigns aisles. Returns the new grocery list.
+    Normalizes, assigns aisles, applies pantry matching.
+    Returns {items_added, pantry_match_count, recipe_title}.
     """
     recipe = await get_recipe(db, recipe_id)
     if recipe is None:
         raise ValueError(f"Recipe {recipe_id} not found")
 
     ingredients = recipe.get("ingredients", [])
-    name = list_name or recipe["title"]
 
     raw_ingredients = [
         (ing, recipe_id, None, recipe.get("base_servings"))
@@ -1239,8 +1270,48 @@ async def add_recipe_to_grocery_list(
     ]
 
     aggregated = await asyncio.to_thread(_aggregate_ingredients, raw_ingredients)
-    list_id = await _save_grocery_list(db, sanitize_field(name), aggregated)
-    return await get_grocery_list(db, list_id)
+
+    # Pantry matching
+    pantry_rows = await list_pantry_items(db)
+    _apply_pantry_flags(aggregated, pantry_rows)
+    pantry_match_count = sum(1 for item in aggregated if item.get("in_pantry"))
+
+    items_added = await _append_to_grocery_list(db, aggregated)
+
+    return {
+        "items_added": items_added,
+        "pantry_match_count": pantry_match_count,
+        "recipe_title": recipe["title"],
+    }
+
+
+async def preview_grocery_additions(
+    db: aiosqlite.Connection,
+    recipe_id: int,
+) -> dict:
+    """Read-only preview of what would be added from a recipe, with pantry flags."""
+    recipe = await get_recipe(db, recipe_id)
+    if recipe is None:
+        raise ValueError(f"Recipe {recipe_id} not found")
+
+    ingredients = recipe.get("ingredients", [])
+    raw_ingredients = [
+        (ing, recipe_id, None, recipe.get("base_servings"))
+        for ing in ingredients
+    ]
+
+    aggregated = await asyncio.to_thread(_aggregate_ingredients, raw_ingredients)
+
+    pantry_rows = await list_pantry_items(db)
+    _apply_pantry_flags(aggregated, pantry_rows)
+    pantry_match_count = sum(1 for item in aggregated if item.get("in_pantry"))
+
+    return {
+        "recipe_id": recipe_id,
+        "recipe_title": recipe["title"],
+        "items": aggregated,
+        "pantry_match_count": pantry_match_count,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -21,10 +21,9 @@ class CalendarEntryBatchCreate(BaseModel):
 
 
 class GroceryListGenerate(BaseModel):
-    """POST payload for generating a grocery list."""
+    """POST payload for generating grocery items from calendar or recipes."""
 
     recipe_ids: list[int] | None = None
-    name: str | None = None
     date_start: date | None = None
     date_end: date | None = None
 
@@ -41,6 +40,7 @@ class GroceryItemCreate(BaseModel):
     """POST payload for adding an ad-hoc grocery item."""
 
     text: str
+    aisle: str | None = None
 
 
 class GroceryItemUpdate(BaseModel):

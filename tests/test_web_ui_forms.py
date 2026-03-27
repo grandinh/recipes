@@ -74,7 +74,7 @@ async def test_add_recipe_to_calendar_form(client, create_recipe):
 # ---------------------------------------------------------------------------
 
 
-async def test_generate_grocery_list_form(client, create_recipe):
+async def test_add_from_calendar_form(client, create_recipe):
     recipe = await create_recipe()
     await client.post(
         "/api/calendar/entries",
@@ -85,25 +85,21 @@ async def test_generate_grocery_list_form(client, create_recipe):
         },
     )
     resp = await client.post(
-        "/grocery-lists/generate",
-        data={"date_start": "2026-03-23", "date_end": "2026-03-29", "name": "Shopping"},
+        "/grocery/add-from-calendar",
+        data={"date_start": "2026-03-23", "date_end": "2026-03-29"},
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert "/grocery-lists/" in resp.headers["location"]
+    assert "/grocery" in resp.headers["location"]
 
 
-async def test_delete_grocery_list_form(client, create_recipe):
-    r = await create_recipe()
-    gl = await client.post(
-        "/api/grocery-lists/generate", json={"recipe_ids": [r["id"]]}
-    )
-    list_id = gl.json()["id"]
+async def test_add_from_recipe_form(client, create_recipe):
+    r = await create_recipe(ingredients=["1 egg"])
     resp = await client.post(
-        f"/grocery-lists/{list_id}/delete", follow_redirects=False
+        f"/grocery/add-from-recipe/{r['id']}", follow_redirects=False
     )
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/grocery-lists"
+    assert "/grocery" in resp.headers["location"]
 
 
 # ---------------------------------------------------------------------------

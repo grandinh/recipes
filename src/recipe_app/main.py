@@ -20,8 +20,8 @@ from recipe_app.db import (
     toggle_favorite, set_rating,
     add_calendar_entry, get_calendar_week, remove_calendar_entry,
     list_recipe_titles,
-    list_grocery_lists, get_grocery_list, generate_grocery_list,
-    check_grocery_item, add_grocery_item, delete_grocery_list,
+    get_grocery_list, generate_grocery_list,
+    check_grocery_item, add_grocery_item,
     delete_grocery_item, clear_checked_grocery_items, move_checked_to_pantry,
     add_recipe_to_grocery_list,
     list_pantry_items, add_pantry_item, delete_pantry_item,
@@ -32,7 +32,7 @@ from recipe_app.paprika_import import (
     parse_paprika_archive, import_paprika_recipes,
 )
 from recipe_app.photos import save_photo, delete_photo
-from recipe_app.routers import recipes, categories, search, meal_plans, pantry, calendar
+from recipe_app.routers import recipes, categories, search, grocery, pantry, calendar
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ app.add_middleware(CSPMiddleware)
 app.include_router(recipes.router)
 app.include_router(categories.router)
 app.include_router(search.router)
-app.include_router(meal_plans.router)
+app.include_router(grocery.router)
 app.include_router(calendar.router)
 app.include_router(pantry.router)
 
@@ -395,57 +395,64 @@ async def _render_calendar_grid(
     )
 
 
-# --- Grocery Lists web UI ---
+# --- Grocery List web UI (single global list) ---
 
 def _build_aisle_groups(glist: dict) -> list[tuple[str, list[dict]]]:
     """Group grocery list items by aisle for template rendering."""
     aisle_groups: list[tuple[str, list[dict]]] = []
-    aisle_map: dict[str, list[dict]] = {}
+    aisle_map_local: dict[str, list[dict]] = {}
     for item in glist.get("items", []):
         aisle = item.get("aisle") or "Other"
-        if aisle not in aisle_map:
-            aisle_map[aisle] = []
-            aisle_groups.append((aisle, aisle_map[aisle]))
-        aisle_map[aisle].append(item)
+        if aisle not in aisle_map_local:
+            aisle_map_local[aisle] = []
+            aisle_groups.append((aisle, aisle_map_local[aisle]))
+        aisle_map_local[aisle].append(item)
     return aisle_groups
 
 
-@app.get("/grocery-lists", response_class=HTMLResponse)
-async def grocery_lists_page(request: Request):
+@app.get("/grocery", response_class=HTMLResponse)
+async def grocery_page(
+    request: Request,
+    flash: str | None = None,
+    hx_request: Annotated[str | None, Header()] = None,
+):
     db = get_db(request)
-    lists = await list_grocery_lists(db)
-    return templates.TemplateResponse(request, "grocery_lists.html", {"lists": lists})
-
-
-@app.get("/grocery-lists/{list_id}", response_class=HTMLResponse)
-async def grocery_list_detail_page(request: Request, list_id: int):
-    db = get_db(request)
-    glist = await get_grocery_list(db, list_id)
-    if glist is None:
-        return HTMLResponse("Grocery list not found", status_code=404)
+    glist = await get_grocery_list(db)
     aisle_groups = _build_aisle_groups(glist)
-    return templates.TemplateResponse(request, "grocery_list_detail.html", {
+    context = {
         "glist": glist,
         "aisle_groups": aisle_groups,
-    })
+        "flash_message": flash,
+    }
+    block_name = "items_list" if hx_request else None
+    return templates.TemplateResponse(request, "grocery.html", context, block_name=block_name)
 
 
-@app.post("/grocery-lists/generate")
-async def generate_grocery_list_submit(request: Request):
+@app.post("/grocery/add-item")
+async def add_item_submit(
+    request: Request,
+    hx_request: Annotated[str | None, Header()] = None,
+):
     form = await request.form()
     db = get_db(request)
-    name = form.get("name") or None
-    date_start = form.get("date_start") or None
-    date_end = form.get("date_end") or None
-    glist = await generate_grocery_list(
-        db, name=name, date_start=date_start, date_end=date_end,
-    )
-    return RedirectResponse(f"/grocery-lists/{glist['id']}", status_code=303)
+    text = form.get("text", "").strip()
+    aisle = form.get("aisle", "").strip() or None
+    if text:
+        await add_grocery_item(db, text, aisle=aisle)
+    if hx_request:
+        glist = await get_grocery_list(db)
+        aisle_groups = _build_aisle_groups(glist)
+        return templates.TemplateResponse(
+            request, "grocery.html",
+            {"glist": glist, "aisle_groups": aisle_groups},
+            block_name="items_list",
+        )
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/grocery-lists/{list_id}/check/{item_id}")
+@app.post("/grocery/check/{item_id}")
 async def check_item_submit(
-    request: Request, list_id: int, item_id: int,
+    request: Request, item_id: int,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     form = await request.form()
@@ -454,106 +461,90 @@ async def check_item_submit(
     item = await check_grocery_item(db, item_id, is_checked)
     if hx_request and item:
         return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
-            {"item": item, "glist": {"id": list_id}},
+            request, "grocery.html",
+            {"item": item, "glist": {}},
             block_name="grocery_item",
         )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/grocery-lists/{list_id}/add-item")
-async def add_item_submit(
-    request: Request, list_id: int,
-    hx_request: Annotated[str | None, Header()] = None,
-):
-    form = await request.form()
-    db = get_db(request)
-    text = form.get("text", "").strip()
-    if text:
-        await add_grocery_item(db, list_id, text)
-    if hx_request:
-        glist = await get_grocery_list(db, list_id)
-        aisle_groups = _build_aisle_groups(glist)
-        return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
-            {"glist": glist, "aisle_groups": aisle_groups},
-            block_name="items_list",
-        )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
-
-
-@app.post("/grocery-lists/{list_id}/delete")
-async def delete_grocery_list_submit(request: Request, list_id: int):
-    db = get_db(request)
-    await delete_grocery_list(db, list_id)
-    return RedirectResponse("/grocery-lists", status_code=303)
-
-
-@app.post("/grocery-lists/{list_id}/delete-item/{item_id}")
+@app.post("/grocery/delete-item/{item_id}")
 async def delete_grocery_item_submit(
-    request: Request, list_id: int, item_id: int,
+    request: Request, item_id: int,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     db = get_db(request)
     await delete_grocery_item(db, item_id)
     if hx_request:
-        glist = await get_grocery_list(db, list_id)
+        glist = await get_grocery_list(db)
         aisle_groups = _build_aisle_groups(glist)
         return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
+            request, "grocery.html",
             {"glist": glist, "aisle_groups": aisle_groups},
             block_name="items_list",
         )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/grocery-lists/{list_id}/clear-checked")
+@app.post("/grocery/clear-checked")
 async def clear_checked_submit(
-    request: Request, list_id: int,
+    request: Request,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     db = get_db(request)
-    await clear_checked_grocery_items(db, list_id)
+    await clear_checked_grocery_items(db)
     if hx_request:
-        glist = await get_grocery_list(db, list_id)
+        glist = await get_grocery_list(db)
         aisle_groups = _build_aisle_groups(glist)
         return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
+            request, "grocery.html",
             {"glist": glist, "aisle_groups": aisle_groups},
             block_name="items_list",
         )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/grocery-lists/{list_id}/move-to-pantry")
+@app.post("/grocery/move-to-pantry")
 async def move_to_pantry_submit(
-    request: Request, list_id: int,
+    request: Request,
     hx_request: Annotated[str | None, Header()] = None,
 ):
     db = get_db(request)
-    result = await move_checked_to_pantry(db, list_id)
-    if result is None:
-        return HTMLResponse("Grocery list not found", status_code=404)
+    result = await move_checked_to_pantry(db)
     if hx_request:
-        glist = await get_grocery_list(db, list_id)
+        glist = await get_grocery_list(db)
         aisle_groups = _build_aisle_groups(glist)
         return templates.TemplateResponse(
-            request, "grocery_list_detail.html",
+            request, "grocery.html",
             {"glist": glist, "aisle_groups": aisle_groups,
              "move_result": result},
             block_name="items_list",
         )
-    return RedirectResponse(f"/grocery-lists/{list_id}", status_code=303)
+    return RedirectResponse("/grocery", status_code=303)
 
 
-@app.post("/recipes/{recipe_id}/add-to-grocery-list")
-async def add_recipe_to_grocery_list_submit(request: Request, recipe_id: int):
+@app.post("/grocery/add-from-recipe/{recipe_id}")
+async def add_from_recipe_submit(request: Request, recipe_id: int):
     db = get_db(request)
     try:
-        glist = await add_recipe_to_grocery_list(db, recipe_id)
+        result = await add_recipe_to_grocery_list(db, recipe_id)
     except ValueError:
         return HTMLResponse("Recipe not found", status_code=404)
-    return RedirectResponse(f"/grocery-lists/{glist['id']}", status_code=303)
+    flash = f"{result['items_added']} items added to grocery list"
+    return RedirectResponse(f"/grocery?flash={flash}", status_code=303)
+
+
+@app.post("/grocery/add-from-calendar")
+async def add_from_calendar_submit(request: Request):
+    form = await request.form()
+    db = get_db(request)
+    date_start = form.get("date_start") or None
+    date_end = form.get("date_end") or None
+    result = await generate_grocery_list(
+        db, date_start=date_start, date_end=date_end,
+    )
+    flash = f"{result['items_added']} items added to grocery list"
+    return RedirectResponse(f"/grocery?flash={flash}", status_code=303)
 
 
 # --- Pantry web UI ---
