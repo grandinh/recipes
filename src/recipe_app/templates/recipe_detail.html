@@ -120,7 +120,7 @@
         <h2>Ingredients</h2>
         <div class="scale-buttons" id="scaleButtons" data-recipe-id="{{ recipe.id }}"
              data-base-servings="{{ recipe.base_servings or '' }}"
-             data-ingredients="{{ recipe.ingredients | tojson }}">
+             data-ingredients='{{ recipe.ingredients | tojson }}'>
           <button type="button" class="btn btn-sm scale-btn" data-factor="0.5">&times;&#189;</button>
           <button type="button" class="btn btn-sm scale-btn active" data-factor="1">&times;1</button>
           <button type="button" class="btn btn-sm scale-btn" data-factor="2">&times;2</button>

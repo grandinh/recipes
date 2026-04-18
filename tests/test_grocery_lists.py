@@ -25,7 +25,7 @@ async def test_add_manual_item_with_aisle(client):
     assert resp.status_code == 201
     item = resp.json()
     assert item["text"] == "Milk"
-    assert item["aisle"] == "Dairy &amp; Eggs"  # sanitized
+    assert item["aisle"] == "Dairy & Eggs"
 
 
 async def test_generate_from_recipe_ids(client, create_recipe):

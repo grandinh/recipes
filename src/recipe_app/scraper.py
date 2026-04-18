@@ -8,6 +8,8 @@ import re
 import socket
 from urllib.parse import urlparse
 
+from typing import Any
+
 import bleach
 import httpx
 import recipe_scrapers
@@ -23,6 +25,23 @@ ALLOWED_TAGS: list[str] = [
 
 # FTS5 operators that must be stripped from user search input
 _FTS5_OPERATORS = re.compile(r"\b(AND|OR|NOT|NEAR)\b", re.IGNORECASE)
+
+# JSON-LD core meta keys that recipe_scrapers occasionally leaks into
+# extracted text/dict structures. Composed into per-context skip sets below.
+_JSONLD_META_KEYS: frozenset[str] = frozenset({"@type", "@context", "@id"})
+
+# Keys to drop when normalizing a schema.org Nutrition dict.
+_NUTRITION_SKIP_KEYS: frozenset[str] = _JSONLD_META_KEYS | frozenset({"servingSize"})
+
+# HowToStep field-name lines to drop when recipe_scrapers emits them as
+# bare text instead of structured steps.
+_HOWTOSTEP_FIELD_NAMES: frozenset[str] = _JSONLD_META_KEYS | frozenset(
+    {"text", "url", "name", "image"}
+)
+
+# Pre-compiled regexes for nutrient key normalization.
+_RE_CONTENT_SUFFIX = re.compile(r"Content$")
+_RE_CAMEL_CASE = re.compile(r"([a-z])([A-Z])")
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +137,22 @@ def parse_time_minutes(value) -> int | None:
         return minutes if minutes > 0 else None
     except (TypeError, ValueError):
         return None
+
+
+def _format_nutrition(raw: dict[str, Any]) -> dict[str, Any]:
+    """Convert schema.org nutrient keys to human-readable labels.
+
+    Drops JSON-LD meta + servingSize and converts camelCase like
+    ``carbohydrateContent`` to ``Carbohydrate``.
+    """
+    out: dict[str, Any] = {}
+    for key, val in raw.items():
+        if key in _NUTRITION_SKIP_KEYS or not val:
+            continue
+        label = _RE_CONTENT_SUFFIX.sub("", key)
+        label = _RE_CAMEL_CASE.sub(r"\1 \2", label)
+        out[label.strip().title()] = val
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +265,13 @@ async def import_from_url(url: str) -> tuple[dict, list[str]]:
     try:
         raw_instructions = scraper.instructions()
         if raw_instructions:
-            directions = sanitize_field(raw_instructions)
+            # Filter out JSON-LD schema keys that recipe_scrapers sometimes
+            # emits when HowToStep.itemListElement is a dict instead of a list.
+            lines = [
+                ln for ln in raw_instructions.split("\n")
+                if ln.strip() not in _HOWTOSTEP_FIELD_NAMES
+            ]
+            directions = sanitize_field("\n".join(lines)) or None
     except Exception:
         warnings.append("Could not extract directions")
 
@@ -274,7 +315,11 @@ async def import_from_url(url: str) -> tuple[dict, list[str]]:
     try:
         nutrients = scraper.nutrients()
         if nutrients and isinstance(nutrients, dict):
-            nutritional_info = nutrients
+            # Convert schema.org camelCase keys to readable labels and
+            # drop meta fields like @type, servingSize.
+            nutritional_info = _format_nutrition(nutrients)
+            if not nutritional_info:
+                nutritional_info = None
     except Exception:
         warnings.append("Could not extract nutritional info")
 

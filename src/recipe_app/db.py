@@ -14,6 +14,7 @@ from typing import Any
 import aiosqlite
 from fastapi import Request
 
+from recipe_app.aisle_map import VALID_AISLES, assign_aisle
 from recipe_app.config import settings
 from recipe_app.models import RecipeCreate, RecipeUpdate, SearchParams
 from recipe_app.sanitize import sanitize_field, sanitize_url
@@ -1018,7 +1019,7 @@ async def _append_to_grocery_list(
                     list_id,
                     sanitize_field(item["text"]),
                     offset + item["sort_order"],
-                    sanitize_field(item["aisle"]),
+                    item["aisle"],
                     item["recipe_id"],
                     sanitize_field(item["normalized_name"]) if item["normalized_name"] else None,
                 )
@@ -1154,11 +1155,10 @@ async def add_grocery_item(
     """Add a manual item to the global grocery list."""
     list_id = await _get_global_list_id(db)
     text = sanitize_field(text)
-    if aisle is not None:
-        aisle = sanitize_field(aisle)
-    else:
-        from recipe_app.aisle_map import assign_aisle
+    if aisle is None:
         aisle = assign_aisle(text)[0]
+    elif aisle not in VALID_AISLES:
+        aisle = "Other"
     async with _write_lock:
         cursor = await db.execute(
             "SELECT COALESCE(MAX(sort_order), 0) as max_order "
@@ -1231,7 +1231,7 @@ async def move_checked_to_pantry(db: aiosqlite.Connection) -> dict:
                     warnings.append(f"Skipped item with unsanitizable name: {row['text']!r}")
                     continue
                 name = sanitized
-                category = sanitize_field(aisle) if aisle else None
+                category = aisle or None
 
                 cursor2 = await db.execute(
                     """INSERT INTO pantry_items (name, category)

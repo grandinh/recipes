@@ -85,6 +85,11 @@ _AISLE_DATA: dict[tuple[str, int], list[str]] = {
     ],
 }
 
+# Set of valid aisle names for input validation
+VALID_AISLES: frozenset[str] = frozenset(
+    aisle for aisle, _ in _AISLE_DATA
+) | {"Other"}
+
 # Build a flat lookup sorted by descending keyword length (longest match first)
 _KEYWORD_LOOKUP: list[tuple[str, str, int]] = []  # (keyword, aisle_name, sort_order)
 for (aisle_name, sort_order), keywords in _AISLE_DATA.items():
