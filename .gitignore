@@ -8,3 +8,6 @@ data/
 dist/
 build/
 paprika_exports/
+
+# Per-developer Claude Code state (settings, ce-review worktrees, etc.)
+.claude/
