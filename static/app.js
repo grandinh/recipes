@@ -44,8 +44,8 @@ function initHtmxHandlers() {
   // Re-init after HTMX swaps (partial updates and hx-boost navigation)
   document.body.addEventListener('htmx:afterSettle', function (evt) {
     var target = evt.detail.target;
-    // Boosted navigation replaces <main> content — re-init everything
-    if (target.tagName === 'MAIN' || target.closest('main')) {
+    // Boosted navigation replaces <main> (or <body>) content — re-init everything
+    if (target.tagName === 'BODY' || target.tagName === 'MAIN' || target.closest('main')) {
       // Ghost cooking mode fix: detect recipe change
       var newBtn = document.getElementById('cookingModeBtn');
       var newRecipeId = newBtn ? newBtn.dataset.recipeId : null;
@@ -127,9 +127,9 @@ function initDocumentDelegation() {
     document.addEventListener('click', function (e) {
       var li = e.target.closest('.ingredient-item');
       if (!li || !_cookingState.active) return;
-      li.classList.toggle('strikethrough');
+      li.classList.toggle('checked');
       var key = 'cooking-' + _cookingState.recipeId + '-ingredient-' + li.dataset.index;
-      if (li.classList.contains('strikethrough')) {
+      if (li.classList.contains('checked')) {
         localStorage.setItem(key, '1');
       } else {
         localStorage.removeItem(key);
@@ -146,9 +146,9 @@ function initDocumentDelegation() {
       );
       if (li) {
         if (e.newValue === '1') {
-          li.classList.add('strikethrough');
+          li.classList.add('checked');
         } else {
-          li.classList.remove('strikethrough');
+          li.classList.remove('checked');
         }
       }
     });
@@ -177,7 +177,7 @@ function initDocumentDelegation() {
 
       var currentIdx = -1;
       for (var i = 0; i < steps.length; i++) {
-        if (steps[i].classList.contains('active-step')) {
+        if (steps[i].classList.contains('active')) {
           currentIdx = i;
           break;
         }
@@ -314,7 +314,7 @@ function initCookingMode() {
   _restoreCookingState();
 
   // Check if any items are struck through (resume cooking)
-  var hasState = document.querySelector('.ingredient-item.strikethrough');
+  var hasState = document.querySelector('.ingredient-item.checked');
   if (hasState) {
     _cookingState.active = true;
     btn.textContent = 'Done Cooking';
@@ -334,7 +334,7 @@ function initCookingMode() {
         // Clear all cooking state
         var items = document.querySelectorAll('.ingredient-item');
         items.forEach(function (li) {
-          li.classList.remove('strikethrough');
+          li.classList.remove('checked');
           localStorage.removeItem(
             'cooking-' + _cookingState.recipeId + '-ingredient-' + li.dataset.index
           );
@@ -342,7 +342,7 @@ function initCookingMode() {
         // Clear step state
         var steps = document.querySelectorAll('.direction-step');
         steps.forEach(function (s) {
-          s.classList.remove('active-step', 'completed-step');
+          s.classList.remove('active', 'completed');
         });
         localStorage.removeItem('cooking-' + _cookingState.recipeId + '-step');
         _cookingState.active = false;
@@ -370,7 +370,7 @@ function _restoreCookingState() {
   items.forEach(function (li) {
     var key = 'cooking-' + _cookingState.recipeId + '-ingredient-' + li.dataset.index;
     if (localStorage.getItem(key) === '1') {
-      li.classList.add('strikethrough');
+      li.classList.add('checked');
     }
   });
 }
@@ -382,14 +382,14 @@ function _setActiveStep(stepEl) {
 
   steps.forEach(function (s) {
     var idx = parseInt(s.dataset.step, 10);
-    s.classList.remove('active-step');
+    s.classList.remove('active');
     if (idx < targetIdx) {
-      s.classList.add('completed-step');
+      s.classList.add('completed');
     } else {
-      s.classList.remove('completed-step');
+      s.classList.remove('completed');
     }
   });
-  stepEl.classList.add('active-step');
+  stepEl.classList.add('active');
   stepEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   // Persist
@@ -945,7 +945,7 @@ function _updateGroceryRemaining() {
 }
 
 function _updateAisleEmptyState() {
-  var sections = document.querySelectorAll('.aisle-section');
+  var sections = document.querySelectorAll('.grocery-aisle');
   sections.forEach(function (section) {
     var visible = section.querySelectorAll('.grocery-item:not(.checked)').length;
     if (visible === 0 && document.getElementById('hideCheckedToggle').checked) {
@@ -981,3 +981,140 @@ function _releaseWakeLock() {
     _cookingState.wakeLock = null;
   }
 }
+
+// === Tweaks Panel + Theme (Design v0.3) ===
+(function () {
+  var THEME_KEY = 'recipe-app-theme';
+
+  function applyTheme(val) {
+    var root = document.documentElement;
+    if (val === 'auto' || !val) {
+      root.removeAttribute('data-theme');
+    } else {
+      root.setAttribute('data-theme', val);
+    }
+  }
+
+  function initTweaks() {
+    var panel = document.getElementById('tweaksPanel');
+    if (!panel) return;
+
+    var savedTheme = localStorage.getItem(THEME_KEY) || 'auto';
+    applyTheme(savedTheme);
+    var themeRadio = panel.querySelector('input[name="theme"][value="' + savedTheme + '"]');
+    if (themeRadio) themeRadio.checked = true;
+
+    // Open/close toggles (in both header button and panel close button)
+    document.querySelectorAll('[data-tweaks-toggle]').forEach(function (btn) {
+      if (btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', function () {
+        panel.classList.toggle('open');
+        panel.setAttribute('aria-hidden', panel.classList.contains('open') ? 'false' : 'true');
+      });
+    });
+
+    panel.querySelectorAll('input[name="theme"]').forEach(function (input) {
+      if (input.dataset.bound === '1') return;
+      input.dataset.bound = '1';
+      input.addEventListener('change', function () {
+        applyTheme(input.value);
+        localStorage.setItem(THEME_KEY, input.value);
+      });
+    });
+  }
+
+  // Keyboard: Cmd/Ctrl+K focus global search; Escape close tweaks
+  function initShortcuts() {
+    if (window.__recipeShortcutsBound) return;
+    window.__recipeShortcutsBound = true;
+    document.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        var input = document.getElementById('globalSearch');
+        if (input) { e.preventDefault(); input.focus(); input.select(); }
+      } else if (e.key === 'Escape') {
+        var panel = document.getElementById('tweaksPanel');
+        if (panel && panel.classList.contains('open')) {
+          panel.classList.remove('open');
+          panel.setAttribute('aria-hidden', 'true');
+        }
+      }
+    });
+  }
+
+  // Global search lives in the header, targets #recipe-grid. On pages that
+  // don't render the grid (/calendar, /grocery, /pantry, etc.) HTMX would
+  // still fire wasted debounced GETs to `/`. Intercept those and redirect.
+  function initGlobalSearchFallback() {
+    if (window.__globalSearchHandler) return;
+    window.__globalSearchHandler = true;
+
+    // Enter key: if no grid, navigate to /?q=…
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      var input = e.target;
+      if (!input || input.id !== 'globalSearch') return;
+      if (!document.getElementById('recipe-grid')) {
+        e.preventDefault();
+        window.location.href = '/?q=' + encodeURIComponent(input.value);
+      }
+    });
+
+    // Debounced-input HTMX trigger: cancel the request when grid is absent.
+    document.body.addEventListener('htmx:configRequest', function (evt) {
+      var el = evt.detail.elt;
+      if (el && el.id === 'globalSearch' && !document.getElementById('recipe-grid')) {
+        evt.preventDefault();
+      }
+    });
+  }
+
+  function boot() {
+    initTweaks();
+    initShortcuts();
+    initGlobalSearchFallback();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+
+  // Re-bind tweaks panel after HTMX boosted nav (the header is inside <body>
+  // and gets replaced; its buttons need fresh listeners). initTweaks is
+  // idempotent via the dataset.bound guard.
+  document.body.addEventListener('htmx:afterSettle', function () {
+    initTweaks();
+  });
+})();
+
+// === Recipe Detail Tabs (Design v0.3) ===
+function initRecipeTabs() {
+  var tabs = document.querySelectorAll('.recipe-tab');
+  if (!tabs.length) return;
+  tabs.forEach(function (tab) {
+    if (tab.dataset.bound === '1') return;
+    tab.dataset.bound = '1';
+    tab.addEventListener('click', function () {
+      var name = tab.dataset.tab;
+      document.querySelectorAll('.recipe-tab').forEach(function (t) { t.classList.remove('active'); });
+      document.querySelectorAll('.recipe-tab-content').forEach(function (c) { c.classList.remove('active'); });
+      tab.classList.add('active');
+      var pane = document.getElementById('tab-' + name);
+      if (pane) pane.classList.add('active');
+    });
+  });
+}
+
+document.addEventListener('DOMContentLoaded', initRecipeTabs);
+document.body.addEventListener('htmx:afterSettle', initRecipeTabs);
+
+// Delegated ingredient-checkbox strike-through (CSP-safe)
+document.addEventListener('change', function (e) {
+  var cb = e.target;
+  if (!(cb instanceof HTMLInputElement)) return;
+  if (!cb.classList.contains('ingredient-checkbox')) return;
+  var li = cb.closest('.ingredient-item');
+  if (li) li.classList.toggle('checked', cb.checked);
+});

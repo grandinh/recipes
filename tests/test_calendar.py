@@ -97,10 +97,12 @@ async def test_calendar_week_param(client, calendar_with_entries):
 
     resp = await client.get(f"/calendar?week={next_monday.isoformat()}")
     assert resp.status_code == 200
-    assert "Pasta Carbonara" in resp.text  # next week has this entry
-    # Check that the calendar-entry class only has Pasta Carbonara
-    assert 'class="calendar-entry-title">Pasta Carbonara' in resp.text
-    assert 'class="calendar-entry-title">Caesar Salad' not in resp.text
+    # Pasta Carbonara should appear as a calendar entry (not just in the add-recipe <select>)
+    assert 'class="calendar-entry"' in resp.text
+    assert "Pasta Carbonara</a>" in resp.text
+    # Caesar Salad is on the prior week — shouldn't appear as a calendar-entry link,
+    # but may still show in the add-recipe <option> list, so check it's not linked as an entry
+    assert "Caesar Salad</a>" not in resp.text
 
 
 async def test_calendar_bad_week_param(client):

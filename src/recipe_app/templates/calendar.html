@@ -3,161 +3,140 @@
 {% block title %}Calendar — Recipe Manager{% endblock %}
 
 {% block content %}
-<section class="page-header">
-  <h1>Calendar</h1>
-  <div class="detail-actions">
-    <a href="/grocery" class="btn btn-secondary">Grocery List</a>
-  </div>
-</section>
-
-{# Add this week's ingredients to the global grocery list #}
-<section class="generate-grocery">
-  <form method="post" action="/grocery/add-from-calendar" class="inline-create-form">
-    <input type="hidden" name="date_start" value="{{ week_start|isodate }}">
-    <input type="hidden" name="date_end" value="{{ week_end|isodate }}">
-    <button type="submit" class="btn btn-primary">Add This Week to Grocery List</button>
-  </form>
-</section>
-
-{# Add recipe form (shared — populated by "+" buttons via JS) #}
-<section class="add-entry-section" id="add-recipe-section">
-  <h2>Add Recipe</h2>
-  <form method="post" action="/calendar/add-recipe"
-        id="add-recipe-form"
-        hx-post="/calendar/add-recipe"
-        hx-target="#calendar-grid"
-        hx-swap="innerHTML">
-    <div class="form-row">
-      <div class="form-group" style="flex: 2;">
-        <select name="recipe_id" class="input" required>
-          <option value="">Select a recipe...</option>
-          {% for r in all_recipes %}
-            <option value="{{ r.id }}">{{ r.title }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-group">
-        <input type="date" name="date" class="input" required>
-      </div>
-      <div class="form-group">
-        <select name="meal_slot" class="input" required>
-          <option value="">Meal slot...</option>
-          <option value="breakfast">Breakfast</option>
-          <option value="lunch">Lunch</option>
-          <option value="dinner">Dinner</option>
-          <option value="snack">Snack</option>
-        </select>
-      </div>
-      <button type="submit" class="btn btn-primary">Add</button>
+<div class="view-content">
+  <div class="recipe-list-header">
+    <h1 class="recipe-list-title">Meal Calendar</h1>
+    <div class="recipe-filters">
+      <button class="btn btn-secondary btn-sm"
+              hx-get="/calendar?week={{ prev_week }}"
+              hx-target="#calendar-grid"
+              hx-swap="innerHTML"
+              hx-headers='{"HX-Push-Url": "/calendar?week={{ prev_week }}"}'>← Prev Week</button>
+      <a class="btn btn-secondary btn-sm" href="/calendar" hx-boost="true">Today</a>
+      <button class="btn btn-secondary btn-sm"
+              hx-get="/calendar?week={{ next_week }}"
+              hx-target="#calendar-grid"
+              hx-swap="innerHTML"
+              hx-headers='{"HX-Push-Url": "/calendar?week={{ next_week }}"}'>Next Week →</button>
+      <form method="post" action="/grocery/add-from-calendar" class="inline-form">
+        <input type="hidden" name="date_start" value="{{ week_start|isodate }}">
+        <input type="hidden" name="date_end" value="{{ week_end|isodate }}">
+        <button type="submit" class="btn btn-primary btn-sm">Add Week to Grocery</button>
+      </form>
     </div>
-  </form>
-</section>
-
-{# Calendar grid #}
-{% block calendar_grid %}
-<div id="calendar-grid" hx-sync="this:replace">
-  {# Week navigation #}
-  <div class="calendar-nav">
-    <button class="btn btn-secondary btn-small"
-            hx-get="/calendar?week={{ prev_week }}"
-            hx-target="#calendar-grid"
-            hx-swap="innerHTML"
-            hx-headers='{"HX-Push-Url": "/calendar?week={{ prev_week }}"}'>
-      &larr; Prev
-    </button>
-    <span class="calendar-nav-title">
-      {{ week_start|month_day }} &ndash; {{ week_end|month_day }}, {{ week_start.year }}
-    </span>
-    <button class="btn btn-secondary btn-small"
-            hx-get="/calendar?week={{ next_week }}"
-            hx-target="#calendar-grid"
-            hx-swap="innerHTML"
-            hx-headers='{"HX-Push-Url": "/calendar?week={{ next_week }}"}'>
-      Next &rarr;
-    </button>
   </div>
 
-  {# Desktop calendar grid #}
-  <div class="calendar-grid">
-    {# Day headers #}
-    <div class="calendar-slot-label"></div>
-    {% for day in days %}
-      <div class="calendar-header {% if day == today %}today{% endif %}">
-        <span class="calendar-day-name">{{ day|weekday_short }}</span>
-        <span class="calendar-day-num">{{ day|day_num }}</span>
-      </div>
-    {% endfor %}
+  {# Add-recipe form — populated by the "+" buttons in the grid #}
+  <section class="add-entry-section" id="add-recipe-section" style="background: var(--bg-secondary); border-radius: var(--radius-lg); padding: var(--space-md); margin-bottom: var(--space-lg);">
+    <form method="post" action="/calendar/add-recipe"
+          id="add-recipe-form"
+          hx-post="/calendar/add-recipe"
+          hx-target="#calendar-grid"
+          hx-swap="innerHTML"
+          style="display: flex; gap: var(--space-sm); flex-wrap: wrap; align-items: center;">
+      <select name="recipe_id" class="input" required style="flex: 2; min-width: 200px;">
+        <option value="">Select a recipe…</option>
+        {% for r in all_recipes %}
+          <option value="{{ r.id }}">{{ r.title }}</option>
+        {% endfor %}
+      </select>
+      <input type="date" name="date" class="input" required style="width: 160px;">
+      <select name="meal_slot" class="input" required style="width: 140px;">
+        <option value="">Meal slot…</option>
+        <option value="breakfast">Breakfast</option>
+        <option value="lunch">Lunch</option>
+        <option value="dinner">Dinner</option>
+        <option value="snack">Snack</option>
+      </select>
+      <button type="submit" class="btn btn-primary">Add</button>
+    </form>
+  </section>
 
-    {# Meal slot rows #}
-    {% for slot in meal_slots %}
-      <div class="calendar-slot-label">{{ slot|capitalize }}</div>
+  {% block calendar_grid %}
+  <div id="calendar-grid" hx-sync="this:replace">
+    <div class="calendar-nav" style="display: flex; align-items: center; justify-content: center; gap: var(--space-md); margin-bottom: var(--space-md); font-size: 15px; font-weight: 600; color: var(--text-secondary);">
+      <span>{{ week_start|month_day }} – {{ week_end|month_day }}, {{ week_start.year }}</span>
+    </div>
+
+    <div class="calendar-grid">
+      <div class="calendar-slot-label"></div>
       {% for day in days %}
-        {% set cell_key = (day|isodate, slot) %}
-        <div class="calendar-cell {% if day == today %}today{% endif %}">
-          {% for entry in entries_by_cell.get(cell_key, []) %}
-            <div class="calendar-entry">
-              <a href="/recipe/{{ entry.recipe_id }}" class="calendar-entry-title">{{ entry.recipe_title }}</a>
-              <form method="post"
-                    action="/calendar/entries/{{ entry.id }}/remove"
-                    hx-post="/calendar/entries/{{ entry.id }}/remove"
-                    hx-target="#calendar-grid"
-                    hx-swap="innerHTML"
-                    class="inline-form">
-                <input type="hidden" name="week_start" value="{{ week_start|isodate }}">
-                <button type="submit" class="calendar-remove-btn" title="Remove">&times;</button>
-              </form>
-            </div>
+        <div class="calendar-header {% if day == today %}today{% endif %}">
+          <div>{{ day|weekday_short }}</div>
+          <div style="font-size: 18px; font-weight: 700; margin-top: 2px;">{{ day|day_num }}</div>
+        </div>
+      {% endfor %}
+
+      {% for slot in meal_slots %}
+        <div class="calendar-slot-label">{{ slot|capitalize }}</div>
+        {% for day in days %}
+          {% set cell_key = (day|isodate, slot) %}
+          <div class="calendar-cell {% if day == today %}today{% endif %}">
+            {% for entry in entries_by_cell.get(cell_key, []) %}
+              <div class="calendar-entry">
+                <a href="/recipe/{{ entry.recipe_id }}" hx-boost="true" style="color: var(--text-primary); text-decoration: none; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ entry.recipe_title }}</a>
+                <form method="post"
+                      action="/calendar/entries/{{ entry.id }}/remove"
+                      hx-post="/calendar/entries/{{ entry.id }}/remove"
+                      hx-target="#calendar-grid"
+                      hx-swap="innerHTML"
+                      class="inline-form">
+                  <input type="hidden" name="week_start" value="{{ week_start|isodate }}">
+                  <button type="submit" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer; padding: 0 2px; font-size: 14px; line-height: 1;" title="Remove">×</button>
+                </form>
+              </div>
+            {% endfor %}
+            <button type="button" class="calendar-add-btn"
+                    data-date="{{ day|isodate }}"
+                    data-slot="{{ slot }}"
+                    title="Add recipe">+</button>
+          </div>
+        {% endfor %}
+      {% endfor %}
+    </div>
+
+    <div class="calendar-mobile" style="display: none; flex-direction: column; gap: var(--space-md);">
+      {% for day in days %}
+        <div class="calendar-mobile-day {% if day == today %}today{% endif %}" style="background: var(--bg-secondary); border-radius: var(--radius-lg); padding: var(--space-md);">
+          <h3 style="font-size: 15px; font-weight: 600; margin-bottom: var(--space-sm);">{{ day|weekday_short }} {{ day|month_day }}</h3>
+          {% for slot in meal_slots %}
+            {% set cell_key = (day|isodate, slot) %}
+            {% set entries = entries_by_cell.get(cell_key, []) %}
+            {% if entries %}
+              <div style="margin-bottom: var(--space-sm);">
+                <div style="font-size: 12px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">{{ slot|capitalize }}</div>
+                {% for entry in entries %}
+                  <div class="calendar-entry">
+                    <a href="/recipe/{{ entry.recipe_id }}" hx-boost="true" style="color: var(--text-primary); text-decoration: none; flex: 1;">{{ entry.recipe_title }}</a>
+                    <form method="post"
+                          action="/calendar/entries/{{ entry.id }}/remove"
+                          hx-post="/calendar/entries/{{ entry.id }}/remove"
+                          hx-target="#calendar-grid"
+                          hx-swap="innerHTML"
+                          class="inline-form">
+                      <input type="hidden" name="week_start" value="{{ week_start|isodate }}">
+                      <button type="submit" style="background: none; border: none; color: var(--text-tertiary); cursor: pointer;">×</button>
+                    </form>
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
           {% endfor %}
           <button type="button" class="calendar-add-btn"
                   data-date="{{ day|isodate }}"
-                  data-slot="{{ slot }}"
-                  title="Add recipe">+</button>
+                  data-slot=""
+                  style="width: 100%; margin-top: var(--space-sm);"
+                  title="Add recipe">+ Add recipe</button>
         </div>
       {% endfor %}
-    {% endfor %}
-  </div>
-
-  {# Mobile day list (hidden on desktop via CSS) #}
-  <div class="calendar-mobile">
-    {% for day in days %}
-      <div class="calendar-mobile-day {% if day == today %}today{% endif %}">
-        <h3 class="calendar-mobile-day-header">{{ day|weekday_short }} {{ day|month_day }}</h3>
-        {% for slot in meal_slots %}
-          {% set cell_key = (day|isodate, slot) %}
-          {% set entries = entries_by_cell.get(cell_key, []) %}
-          {% if entries %}
-            <div class="calendar-mobile-slot">
-              <span class="calendar-mobile-slot-name">{{ slot|capitalize }}</span>
-              {% for entry in entries %}
-                <div class="calendar-entry">
-                  <a href="/recipe/{{ entry.recipe_id }}" class="calendar-entry-title">{{ entry.recipe_title }}</a>
-                  <form method="post"
-                        action="/calendar/entries/{{ entry.id }}/remove"
-                        hx-post="/calendar/entries/{{ entry.id }}/remove"
-                        hx-target="#calendar-grid"
-                        hx-swap="innerHTML"
-                        class="inline-form">
-                    <input type="hidden" name="week_start" value="{{ week_start|isodate }}">
-                    <button type="submit" class="calendar-remove-btn" title="Remove">&times;</button>
-                  </form>
-                </div>
-              {% endfor %}
-            </div>
-          {% endif %}
-        {% endfor %}
-        <button type="button" class="calendar-add-btn calendar-add-btn-mobile"
-                data-date="{{ day|isodate }}"
-                data-slot=""
-                title="Add recipe">+ Add recipe</button>
-      </div>
-    {% endfor %}
-  </div>
-
-  {% if not has_entries %}
-    <div class="empty-state" style="padding: 1rem;">
-      <p>No recipes planned for this week. Click <strong>+</strong> in a cell to add one.</p>
     </div>
-  {% endif %}
+
+    {% if not has_entries %}
+      <div class="empty-state" style="margin-top: var(--space-lg);">
+        <p>No recipes planned for this week. Click <strong>+</strong> in a cell to add one.</p>
+      </div>
+    {% endif %}
+  </div>
+  {% endblock %}
 </div>
-{% endblock %}
 {% endblock %}

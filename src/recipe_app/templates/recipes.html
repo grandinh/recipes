@@ -3,121 +3,108 @@
 {% block title %}Recipes — Recipe Manager{% endblock %}
 
 {% block content %}
-<section class="page-header">
-  <h1>Recipes</h1>
+<div id="view-recipes" class="view-content">
+  <div class="recipe-list-header">
+    <h1 class="recipe-list-title">All Recipes</h1>
+    <div class="recipe-filters">
+      <form class="import-bar" id="importForm" style="margin: 0;">
+        <input type="url" name="url" placeholder="Import from URL…" required class="input">
+        <button type="submit" class="btn btn-secondary btn-sm">Import</button>
+      </form>
+      <form method="get" action="/" class="recipe-filters" style="gap: var(--space-sm);"
+            hx-target="#recipe-grid" hx-push-url="true" hx-select="#recipe-grid">
+        {# hidden q field so sort/category submissions carry the current search #}
+        <input type="hidden" name="q" value="{{ q or '' }}">
+        <select name="category" class="filter-select"
+                hx-get="/" hx-trigger="change" hx-target="#recipe-grid"
+                hx-push-url="true" hx-select="#recipe-grid" hx-include="closest form">
+          <option value="">All Categories</option>
+          {% for cat in categories %}
+            <option value="{{ cat.name }}" {% if category == cat.name %}selected{% endif %}>
+              {{ cat.name }} ({{ cat.recipe_count }})
+            </option>
+          {% endfor %}
+        </select>
+        <select name="sort" class="filter-select"
+                hx-get="/" hx-trigger="change" hx-target="#recipe-grid"
+                hx-push-url="true" hx-select="#recipe-grid" hx-include="closest form">
+          <option value="recent" {% if sort == 'recent' %}selected{% endif %}>Sort: Recent</option>
+          <option value="name" {% if sort == 'name' %}selected{% endif %}>Sort: Name</option>
+          <option value="rating" {% if sort == 'rating' %}selected{% endif %}>Sort: Rating</option>
+        </select>
+      </form>
+    </div>
+  </div>
 
-  {# Import from URL quick input #}
-  <form class="import-bar" id="importForm">
-    <input type="url" name="url" placeholder="Import from URL..." required class="input import-input">
-    <button type="submit" class="btn btn-secondary">Import</button>
-  </form>
-</section>
-
-{# Search and filter row — htmx live search #}
-<section class="search-filter-row">
-  <form method="get" action="/" class="search-form" hx-sync="this:replace">
-    <input type="search" name="q" value="{{ q or '' }}"
-           placeholder="Search recipes..."
-           class="input search-input"
-           hx-get="/"
-           hx-trigger="input changed delay:300ms, keyup[key=='Enter'], search"
-           hx-target="#recipe-grid"
-           hx-sync="this:replace"
-           hx-push-url="true"
-           hx-include="closest form">
-    <select name="category" class="input select-input"
-            hx-get="/"
-            hx-trigger="change"
-            hx-target="#recipe-grid"
-            hx-push-url="true"
-            hx-include="closest form">
-      <option value="">All Categories</option>
-      {% for cat in categories %}
-        <option value="{{ cat.name }}" {% if category == cat.name %}selected{% endif %}>
-          {{ cat.name }} ({{ cat.recipe_count }})
-        </option>
-      {% endfor %}
-    </select>
-    <select name="sort" class="input select-input"
-            hx-get="/"
-            hx-trigger="change"
-            hx-target="#recipe-grid"
-            hx-push-url="true"
-            hx-include="closest form">
-      <option value="recent" {% if sort == 'recent' %}selected{% endif %}>Newest</option>
-      <option value="name" {% if sort == 'name' %}selected{% endif %}>Name</option>
-      <option value="rating" {% if sort == 'rating' %}selected{% endif %}>Rating</option>
-    </select>
-    <button type="submit" class="btn btn-primary">Search</button>
-    <span class="htmx-indicator search-indicator">Searching...</span>
-  </form>
-</section>
-
-{# Recipe grid — this block is rendered as a fragment for htmx requests #}
-{% block recipe_grid %}
-<div id="recipe-grid">
-{% if recipes %}
-  <section class="recipe-grid">
-    {% for recipe in recipes %}
-      <a href="/recipe/{{ recipe.id }}" class="recipe-card" hx-boost="true">
-        {% if recipe.photo_path %}
-          <div class="card-image">
-            <img src="/photos/thumbnails/{{ recipe.photo_path }}" alt="{{ recipe.title }}" loading="lazy">
-          </div>
-        {% elif recipe.image_url and recipe.image_url.startswith('https') %}
-          <div class="card-image">
-            <img src="{{ recipe.image_url }}" alt="{{ recipe.title }}" loading="lazy">
-          </div>
-        {% else %}
-          <div class="card-image card-image-placeholder"></div>
-        {% endif %}
-        <div class="card-body">
-          <h2 class="card-title">{{ recipe.title }}</h2>
-          {% if recipe.description %}
-            <p class="card-desc">{{ recipe.description[:120] }}{% if recipe.description|length > 120 %}...{% endif %}</p>
-          {% endif %}
-          <div class="card-meta">
-            {% if recipe.rating %}
-              <span class="card-rating">
-                {% for i in range(recipe.rating) %}&#9733;{% endfor %}{% for i in range(5 - recipe.rating) %}&#9734;{% endfor %}
-              </span>
+  {% block recipe_grid %}
+  <div id="recipe-grid">
+    {% if recipes %}
+      <section class="recipe-grid">
+        {% for recipe in recipes %}
+          <a href="/recipe/{{ recipe.id }}" class="recipe-card" hx-boost="true">
+            {% if recipe.photo_path %}
+              <div class="recipe-card-image">
+                <img src="/photos/thumbnails/{{ recipe.photo_path }}" alt="{{ recipe.title }}" loading="lazy" decoding="async" width="280" height="180">
+                {% if recipe.is_favorite %}<div class="recipe-card-favorite" title="Favorite">★</div>{% endif %}
+              </div>
+            {% elif recipe.image_url and recipe.image_url.startswith('https') %}
+              <div class="recipe-card-image">
+                <img src="{{ recipe.image_url }}" alt="{{ recipe.title }}" loading="lazy" decoding="async" width="280" height="180">
+                {% if recipe.is_favorite %}<div class="recipe-card-favorite" title="Favorite">★</div>{% endif %}
+              </div>
+            {% else %}
+              <div class="recipe-card-image">
+                <div class="recipe-card-image-placeholder">🍽️</div>
+                {% if recipe.is_favorite %}<div class="recipe-card-favorite" title="Favorite">★</div>{% endif %}
+              </div>
             {% endif %}
-            {% if recipe.cuisine %}
-              <span class="card-cuisine">{{ recipe.cuisine }}</span>
-            {% endif %}
-            {% if recipe.prep_time_minutes %}
-              <span class="card-time">{{ recipe.prep_time_minutes }} min prep</span>
-            {% endif %}
-          </div>
-          {% if recipe.categories %}
-            <div class="card-tags">
-              {% for cat in recipe.categories %}
-                <span class="tag">{{ cat }}</span>
-              {% endfor %}
+            <div class="recipe-card-body">
+              <div class="recipe-card-title">{{ recipe.title }}</div>
+              {% if recipe.description %}
+                <div class="recipe-card-description">{{ recipe.description }}</div>
+              {% endif %}
+              <div class="recipe-card-meta">
+                {% if recipe.rating %}
+                  <span class="recipe-card-rating">
+                    {% for i in range(recipe.rating) %}★{% endfor %}{% for i in range(5 - recipe.rating) %}<span style="color: var(--star-empty)">★</span>{% endfor %}
+                  </span>
+                {% endif %}
+                {% if recipe.prep_time_minutes %}
+                  <span>⏱️ {{ recipe.prep_time_minutes }} min</span>
+                {% endif %}
+                {% if recipe.cuisine %}
+                  <span>🍽️ {{ recipe.cuisine }}</span>
+                {% endif %}
+              </div>
+              {% if recipe.categories %}
+                <div class="recipe-card-tags">
+                  {% for cat in recipe.categories %}
+                    <span class="tag">{{ cat }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
             </div>
-          {% endif %}
-        </div>
-      </a>
-    {% endfor %}
-  </section>
+          </a>
+        {% endfor %}
+      </section>
 
-  {# Pagination #}
-  <nav class="pagination" hx-boost="true">
-    {% if page > 1 %}
-      <a href="/?q={{ q or '' }}&category={{ category or '' }}&sort={{ sort or 'recent' }}&page={{ page - 1 }}"
-         class="btn btn-secondary">Previous</a>
+      <nav class="pagination" hx-boost="true">
+        {% if page > 1 %}
+          <a href="/?q={{ q or '' }}&category={{ category or '' }}&sort={{ sort or 'recent' }}&page={{ page - 1 }}"
+             class="btn btn-secondary btn-sm">← Previous</a>
+        {% endif %}
+        {% if has_next %}
+          <a href="/?q={{ q or '' }}&category={{ category or '' }}&sort={{ sort or 'recent' }}&page={{ page + 1 }}"
+             class="btn btn-secondary btn-sm">Next →</a>
+        {% endif %}
+      </nav>
+    {% else %}
+      <section class="empty-state">
+        <h2>No recipes found</h2>
+        <p>Try a different search, or <a href="/add">add a new recipe</a>.</p>
+      </section>
     {% endif %}
-    {% if has_next %}
-      <a href="/?q={{ q or '' }}&category={{ category or '' }}&sort={{ sort or 'recent' }}&page={{ page + 1 }}"
-         class="btn btn-secondary">Next</a>
-    {% endif %}
-  </nav>
-{% else %}
-  <section class="empty-state">
-    <h2>No recipes found</h2>
-    <p>Try a different search, or <a href="/add">add a new recipe</a>.</p>
-  </section>
-{% endif %}
+  </div>
+  {% endblock %}
 </div>
-{% endblock %}
 {% endblock %}

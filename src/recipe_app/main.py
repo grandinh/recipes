@@ -472,7 +472,7 @@ async def check_item_submit(
     if hx_request and item:
         return templates.TemplateResponse(
             request, "grocery.html",
-            {"item": item, "glist": {}},
+            {"item": item, "aisle": item["aisle"], "glist": {}},
             block_name="grocery_item",
         )
     return RedirectResponse("/grocery", status_code=303)

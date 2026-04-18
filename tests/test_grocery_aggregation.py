@@ -108,7 +108,7 @@ async def test_grocery_page_renders(client, create_recipe):
     )
     resp = await client.get("/grocery")
     assert resp.status_code == 200
-    assert "aisle-section" in resp.text
+    assert "grocery-aisle" in resp.text
 
 
 async def test_csp_no_inline_handlers(client, create_recipe):

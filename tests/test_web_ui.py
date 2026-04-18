@@ -97,7 +97,7 @@ async def test_grocery_page_with_items(client, create_recipe):
     )
     resp = await client.get("/grocery")
     assert resp.status_code == 200
-    assert "aisle-section" in resp.text
+    assert "grocery-aisle" in resp.text
 
 
 async def test_pantry_page(client):

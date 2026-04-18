@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="auto">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,40 +10,97 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body hx-ext="response-targets">
-  <nav class="navbar">
-    <div class="container nav-inner">
-      <a href="/" class="nav-brand" hx-boost="true">Recipe Manager</a>
-      <div class="nav-links" hx-boost="true">
-        <a href="/">Home</a>
-        <a href="/add">Add Recipe</a>
-        <a href="/calendar">Calendar</a>
-        <a href="/grocery">Grocery List</a>
-        <a href="/pantry">Pantry</a>
-        <a href="/import">Import</a>
+  <div class="app-container">
+    <header class="app-header">
+      <a href="/" class="app-logo" hx-boost="true">🍳 Recipe Manager</a>
+
+      <div class="search-container">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M7 13A6 6 0 1 0 7 1a6 6 0 0 0 0 12zM15 15l-3.35-3.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <input type="search" class="search-input" id="globalSearch"
+               placeholder="Search recipes… (⌘K)"
+               name="q"
+               value="{{ q or '' }}"
+               hx-get="/"
+               hx-trigger="input changed delay:300ms, search"
+               hx-target="#recipe-grid"
+               hx-push-url="true"
+               hx-select="#recipe-grid">
       </div>
+
+      {% set _path = request.url.path if request else '' %}
+      <nav class="app-nav" hx-boost="true">
+        <a class="nav-link {% if _path == '/' or _path.startswith('/recipe') or _path == '/add' %}active{% endif %}" href="/">Recipes</a>
+        <a class="nav-link {% if _path.startswith('/calendar') %}active{% endif %}" href="/calendar">Calendar</a>
+        <a class="nav-link {% if _path.startswith('/grocery') %}active{% endif %}" href="/grocery">Grocery</a>
+        <a class="nav-link {% if _path.startswith('/pantry') %}active{% endif %}" href="/pantry">Pantry</a>
+        <a class="nav-link {% if _path.startswith('/import') %}active{% endif %}" href="/import">Import</a>
+      </nav>
+
+      <div class="app-actions">
+        <a class="btn btn-primary" href="/add" hx-boost="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          Add Recipe
+        </a>
+        <button class="btn btn-icon btn-ghost" type="button" aria-label="Tweaks" data-tweaks-toggle>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M3.5 12.5l1.4-1.4M11.1 4.9l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <div class="main-content">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+
+    <aside class="tweaks-panel" id="tweaksPanel" aria-hidden="true">
+      <div class="tweaks-header">
+        <span>Tweaks</span>
+        <button class="btn btn-sm btn-ghost" type="button" data-tweaks-toggle>Close</button>
+      </div>
+
+      <div class="tweaks-section">
+        <div class="tweaks-section-title">Theme</div>
+        <div class="tweaks-radio-group">
+          <label class="tweaks-radio-option">
+            <input type="radio" name="theme" value="auto" checked>
+            <span class="tweaks-radio-label">Auto (system)</span>
+          </label>
+          <label class="tweaks-radio-option">
+            <input type="radio" name="theme" value="light">
+            <span class="tweaks-radio-label">Light</span>
+          </label>
+          <label class="tweaks-radio-option">
+            <input type="radio" name="theme" value="dark">
+            <span class="tweaks-radio-label">Dark</span>
+          </label>
+        </div>
+      </div>
+
+    </aside>
+
+    {# Cooking timer panel — outside <main> so HTMX swaps never destroy it #}
+    <div id="timer-panel" class="timer-panel" style="display:none"
+         aria-label="Cooking timers" role="region">
+      <button class="timer-panel-toggle" type="button" aria-expanded="false">
+        <span class="timer-count">0</span> timers
+      </button>
+      <div class="timer-list" aria-live="polite"></div>
     </div>
-  </nav>
 
-  <main class="container">
-    {% block content %}{% endblock %}
-  </main>
-
-  {# Timer panel — outside <main> so HTMX swaps never destroy it #}
-  <div id="timer-panel" class="timer-panel" style="display:none"
-       aria-label="Cooking timers" role="region">
-    <button class="timer-panel-toggle" aria-expanded="false">
-      <span class="timer-count">0</span> timers
-    </button>
-    <div class="timer-list" aria-live="polite"></div>
-  </div>
-
-  <footer class="site-footer">
-    <div class="container">
+    <footer class="site-footer">
       {% if recipe_count is defined and recipe_count is not none %}
         <p>{{ recipe_count }} recipe{{ "s" if recipe_count != 1 else "" }} in your collection</p>
       {% endif %}
-      <p class="footer-subtle">Recipe Manager v0.2</p>
-    </div>
-  </footer>
+      <p class="footer-subtle">Recipe Manager v0.3</p>
+    </footer>
+  </div>
 </body>
 </html>

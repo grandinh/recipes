@@ -11,3 +11,9 @@ paprika_exports/
 
 # Per-developer Claude Code state (settings, ce-review worktrees, etc.)
 .claude/
+
+# Design-handoff reference (delivered separately, not checked in)
+design-handoff/
+
+# Serena MCP project state (auto-generated)
+.serena/
