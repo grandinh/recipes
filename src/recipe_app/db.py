@@ -167,6 +167,7 @@ async def init_schema(db: aiosqlite.Connection) -> None:
 
 _KNOWN_TABLES = {"recipes", "categories", "recipe_categories", "calendar_entries",
                  "grocery_lists", "grocery_list_items", "pantry_items",
+                 "recipe_cook_events",
                  "meal_plans", "meal_plan_entries"}  # old tables kept for pre-v4 migrations
 
 
@@ -422,6 +423,60 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         await db.execute("PRAGMA user_version = 4")
         await db.commit()
         logger.info("Migration v3 -> v4 complete (calendar + single grocery list)")
+
+    if version < 5:
+        db_path = str(settings.database_path)
+        backup = f"{db_path}.backup-v{version}-{datetime.now():%Y%m%d%H%M%S}"
+        try:
+            backup_safe = backup.replace("'", "''")
+            await db.execute(f"VACUUM INTO '{backup_safe}'")
+        except Exception:
+            await asyncio.to_thread(shutil.copy2, db_path, backup)
+        logger.info("Database backed up to %s before v5 migration", backup)
+
+        # Denormalized fast-read columns on recipes (idempotent guards)
+        if not await _column_exists(db, "recipes", "last_cooked_at"):
+            await db.execute(
+                "ALTER TABLE recipes ADD COLUMN last_cooked_at TEXT DEFAULT NULL"
+            )
+        if not await _column_exists(db, "recipes", "times_cooked"):
+            # CHECK constraint cannot be added via ALTER TABLE; enforced at write time
+            # by recompute logic in record_recipe_cooked. Fresh DBs from schema.sql
+            # carry the full CHECK(times_cooked >= 0).
+            await db.execute(
+                "ALTER TABLE recipes ADD COLUMN times_cooked INTEGER NOT NULL DEFAULT 0"
+            )
+
+        # Append-only cook event history
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_cook_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+                cooked_at TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'manual'
+                    CHECK(source IN ('manual', 'calendar', 'import', 'migration')),
+                calendar_entry_id INTEGER REFERENCES calendar_entries(id) ON DELETE SET NULL,
+                notes TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cook_events_recipe_time "
+            "ON recipe_cook_events(recipe_id, cooked_at DESC)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cook_events_cooked_at "
+            "ON recipe_cook_events(cooked_at DESC)"
+        )
+
+        cursor = await db.execute("PRAGMA foreign_key_check")
+        violations = await cursor.fetchall()
+        if violations:
+            raise RuntimeError(f"FK violations after v5 migration: {violations}")
+
+        await db.execute("PRAGMA user_version = 5")
+        await db.commit()
+        logger.info("Migration v4 -> v5 complete (cook history + freshness denorm)")
 
 
 @asynccontextmanager
@@ -764,6 +819,7 @@ async def search_recipes(
         "name": "r.title ASC",
         "rating": "r.rating DESC NULLS LAST, r.created_at DESC",
         "recent": "r.created_at DESC",
+        "last_cooked": "r.last_cooked_at IS NULL, r.last_cooked_at DESC",
     }.get(params.sort, order_default)
 
     # If sort wasn't explicitly specified and we have FTS, use BM25
@@ -949,6 +1005,147 @@ async def list_recipe_titles(db: aiosqlite.Connection) -> list[dict]:
     """Lightweight recipe list returning only id and title for pickers."""
     cursor = await db.execute("SELECT id, title FROM recipes ORDER BY title")
     return await cursor.fetchall()
+
+
+# ---------------------------------------------------------------------------
+# CRUD — Cook events (last-cooked history)
+# ---------------------------------------------------------------------------
+
+_VALID_COOK_SOURCES = ("manual", "calendar", "import", "migration")
+
+
+async def _refresh_recipe_freshness(db: aiosqlite.Connection, recipe_id: int) -> None:
+    """Recompute recipes.last_cooked_at and times_cooked from the event log.
+
+    Recompute (vs. increment) so deletes stay correct. Caller must hold the
+    write lock and be inside a transaction.
+    """
+    await db.execute(
+        """
+        UPDATE recipes SET
+            last_cooked_at = (
+                SELECT MAX(cooked_at) FROM recipe_cook_events
+                 WHERE recipe_id = ?
+            ),
+            times_cooked = (
+                SELECT COUNT(*) FROM recipe_cook_events
+                 WHERE recipe_id = ?
+            )
+         WHERE id = ?
+        """,
+        (recipe_id, recipe_id, recipe_id),
+    )
+
+
+async def record_recipe_cooked(
+    db: aiosqlite.Connection,
+    recipe_id: int,
+    cooked_at: str | None = None,
+    source: str = "manual",
+    calendar_entry_id: int | None = None,
+    notes: str | None = None,
+) -> dict:
+    """Record a cook event and refresh the recipe's freshness fields.
+
+    Returns ``{"event": <event_row>, "recipe": <updated_recipe_dict>}``.
+    Raises ``ValueError`` if the recipe does not exist or ``source`` is
+    not one of the allowed values.
+
+    If ``calendar_entry_id`` refers to a missing row, the link is dropped
+    silently and ``source`` is downgraded to ``'manual'`` — the user's intent
+    was "I cooked this," not "I cooked this on that specific plan."
+    """
+    if source not in _VALID_COOK_SOURCES:
+        raise ValueError(f"Invalid source: {source!r}")
+    if notes:
+        notes = sanitize_field(notes)
+
+    async with _write_lock:
+        # Pre-check recipe inside the lock for consistent visibility
+        cursor = await db.execute("SELECT 1 FROM recipes WHERE id = ?", (recipe_id,))
+        if await cursor.fetchone() is None:
+            raise ValueError(f"Recipe {recipe_id} not found")
+
+        if calendar_entry_id is not None:
+            cursor = await db.execute(
+                "SELECT 1 FROM calendar_entries WHERE id = ?",
+                (calendar_entry_id,),
+            )
+            if await cursor.fetchone() is None:
+                calendar_entry_id = None
+                source = "manual"
+
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """
+                INSERT INTO recipe_cook_events
+                  (recipe_id, cooked_at, source, calendar_entry_id, notes)
+                VALUES (?, COALESCE(?, datetime('now')), ?, ?, ?)
+                """,
+                (recipe_id, cooked_at, source, calendar_entry_id, notes),
+            )
+            event_id = cursor.lastrowid
+            await _refresh_recipe_freshness(db, recipe_id)
+            cursor = await db.execute(
+                "SELECT * FROM recipe_cook_events WHERE id = ?", (event_id,),
+            )
+            event_row = await cursor.fetchone()
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    recipe = await get_recipe(db, recipe_id)
+    return {"event": event_row, "recipe": recipe}
+
+
+async def list_recipe_cook_events(
+    db: aiosqlite.Connection,
+    recipe_id: int,
+    limit: int = 20,
+) -> list[dict]:
+    """Cook events for a recipe, newest first.  Tiebreak on id for determinism."""
+    cursor = await db.execute(
+        """
+        SELECT * FROM recipe_cook_events
+         WHERE recipe_id = ?
+         ORDER BY cooked_at DESC, id DESC
+         LIMIT ?
+        """,
+        (recipe_id, limit),
+    )
+    return await cursor.fetchall()
+
+
+async def delete_recipe_cook_event(
+    db: aiosqlite.Connection, event_id: int
+) -> bool:
+    """Delete a cook event and refresh the owning recipe's freshness fields.
+
+    Returns True if a row was deleted, False otherwise.
+    """
+    async with _write_lock:
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT recipe_id FROM recipe_cook_events WHERE id = ?",
+                (event_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await db.rollback()
+                return False
+            recipe_id = row["recipe_id"]
+            await db.execute(
+                "DELETE FROM recipe_cook_events WHERE id = ?", (event_id,),
+            )
+            await _refresh_recipe_freshness(db, recipe_id)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+    return True
 
 
 # ---------------------------------------------------------------------------

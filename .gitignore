@@ -17,3 +17,6 @@ design-handoff/
 
 # Serena MCP project state (auto-generated)
 .serena/
+
+# Codex CLI session marker
+.codex

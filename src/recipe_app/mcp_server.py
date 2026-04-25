@@ -58,6 +58,45 @@ async def get_recipe(recipe_id: int) -> dict | None:
 
 
 @mcp.tool
+async def record_recipe_cooked(
+    recipe_id: int,
+    cooked_at: str | None = None,
+    source: str = "manual",
+    calendar_entry_id: int | None = None,
+    notes: str | None = None,
+) -> dict:
+    """Record that a recipe was cooked. Returns the cook event and updated recipe.
+    cooked_at is an optional ISO 8601 timestamp; source defaults to manual."""
+    db = await get_db()
+    try:
+        return await db_module.record_recipe_cooked(
+            db,
+            recipe_id,
+            cooked_at=cooked_at,
+            source=source,
+            calendar_entry_id=calendar_entry_id,
+            notes=notes,
+        )
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool
+async def get_recipe_cook_history(recipe_id: int, limit: int = 10) -> list[dict]:
+    """List cook events for a recipe, newest first."""
+    db = await get_db()
+    return await db_module.list_recipe_cook_events(db, recipe_id, limit=limit)
+
+
+@mcp.tool
+async def delete_recipe_cook_event(event_id: int) -> str:
+    """Delete a cook event by ID. Returns confirmation."""
+    db = await get_db()
+    deleted = await db_module.delete_recipe_cook_event(db, event_id)
+    return f"Cook event {event_id} deleted" if deleted else f"Cook event {event_id} not found"
+
+
+@mcp.tool
 async def create_recipe(
     title: str,
     ingredients: list[str] | None = None,

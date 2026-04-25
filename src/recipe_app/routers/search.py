@@ -15,7 +15,7 @@ async def search_recipes_endpoint(
     rating_max: int | None = Query(None, ge=1, le=5),
     cuisine: str | None = None,
     is_favorite: bool | None = None,
-    sort: Literal["name", "rating", "recent"] = "recent",
+    sort: Literal["name", "rating", "recent", "last_cooked"] = "recent",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db=Depends(get_db),
