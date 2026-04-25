@@ -101,6 +101,7 @@ class SearchParams(BaseModel):
     rating_max: int | None = Field(None, ge=1, le=5)
     cuisine: str | None = None
     is_favorite: bool | None = None
+    # NOTE: sort keys mirrored in db.py (list_recipes + search_recipes order maps), models.SearchParams, routers/search.py, routers/recipes.py — keep in sync.
     sort: Literal["name", "rating", "recent", "last_cooked"] = "recent"
     limit: int = Field(50, ge=1, le=200)
     offset: int = Field(0, ge=0)

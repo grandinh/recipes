@@ -261,7 +261,7 @@ async def test_mcp_record_history_and_delete_tools(client, create_recipe):
                     {"event_id": recorded["event"]["id"]},
                 )
             )
-            assert "deleted" in deleted.lower()
+            assert deleted == {"deleted": True, "event_id": recorded["event"]["id"]}
     finally:
         if mcp_mod._db is not None:
             await mcp_mod._db.close()
@@ -292,6 +292,36 @@ async def test_mcp_record_missing_recipe_returns_error(client):
         if mcp_mod._db is not None:
             await mcp_mod._db.close()
             mcp_mod._db = None
+
+
+async def test_mcp_record_invalid_cooked_at_returns_error(client, create_recipe):
+    """MCP `record_recipe_cooked` with non-ISO `cooked_at` should return an
+    error dict instead of corrupting the cook-events table with a string
+    that fails lexicographic MAX/ORDER BY comparisons."""
+    from recipe_app import mcp_server as mcp_mod
+
+    recipe = await create_recipe(title="Bad Timestamp")
+    if mcp_mod._db is not None:
+        await mcp_mod._db.close()
+        mcp_mod._db = None
+
+    try:
+        async with Client(mcp_mod.mcp) as mcp_client:
+            result = _parse_mcp_result(
+                await mcp_client.call_tool(
+                    "record_recipe_cooked",
+                    {"recipe_id": recipe["id"], "cooked_at": "not-a-date"},
+                )
+            )
+            assert "error" in result
+            assert "Invalid cooked_at" in result["error"]
+    finally:
+        if mcp_mod._db is not None:
+            await mcp_mod._db.close()
+            mcp_mod._db = None
+
+    # No event row should have been written.
+    assert await _count_cook_events_for_recipe(recipe["id"]) == 0
 
 
 async def test_v5_migration_is_idempotent(tmp_path, monkeypatch):
@@ -340,3 +370,40 @@ async def test_v5_migration_is_idempotent(tmp_path, monkeypatch):
         assert event_count["count"] == 0
     finally:
         await db.close()
+
+
+async def test_mcp_get_history_missing_recipe_returns_error(client):
+    from recipe_app import mcp_server as mcp_mod
+    if mcp_mod._db is not None:
+        await mcp_mod._db.close()
+        mcp_mod._db = None
+    try:
+        async with Client(mcp_mod.mcp) as mcp_client:
+            result = _parse_mcp_result(
+                await mcp_client.call_tool("get_recipe_cook_history", {"recipe_id": 99999})
+            )
+            assert isinstance(result, dict)
+            assert "error" in result
+            assert "not found" in result["error"]
+    finally:
+        if mcp_mod._db is not None:
+            await mcp_mod._db.close()
+            mcp_mod._db = None
+
+
+async def test_mcp_delete_missing_cook_event_returns_error(client):
+    from recipe_app import mcp_server as mcp_mod
+    if mcp_mod._db is not None:
+        await mcp_mod._db.close()
+        mcp_mod._db = None
+    try:
+        async with Client(mcp_mod.mcp) as mcp_client:
+            result = _parse_mcp_result(
+                await mcp_client.call_tool("delete_recipe_cook_event", {"event_id": 99999})
+            )
+            assert isinstance(result, dict)
+            assert "error" in result
+    finally:
+        if mcp_mod._db is not None:
+            await mcp_mod._db.close()
+            mcp_mod._db = None

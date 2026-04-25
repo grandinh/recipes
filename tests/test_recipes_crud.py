@@ -120,6 +120,17 @@ async def test_list_recipes_sort_name(client, sample_recipe, sample_recipe_2):
     assert titles == sorted(titles)
 
 
+async def test_list_recipes_sort_last_cooked(client, sample_recipe, sample_recipe_2):
+    # Regression for todo 016: /api/recipes?sort=last_cooked previously 422'd
+    # because the endpoint Literal omitted "last_cooked" while db.list_recipes
+    # already accepted it.
+    await client.post("/api/recipes", json=sample_recipe)
+    await client.post("/api/recipes", json=sample_recipe_2)
+
+    resp = await client.get("/api/recipes?sort=last_cooked")
+    assert resp.status_code == 200
+
+
 async def test_list_recipes_pagination(client, sample_recipe):
     # Create a few recipes
     for i in range(5):

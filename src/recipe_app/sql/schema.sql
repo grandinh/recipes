@@ -137,7 +137,5 @@ CREATE INDEX IF NOT EXISTS idx_grocery_list_items_recipe ON grocery_list_items(g
 CREATE INDEX IF NOT EXISTS idx_pantry_items_name ON pantry_items(name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_cook_events_recipe_time
     ON recipe_cook_events(recipe_id, cooked_at DESC);
-CREATE INDEX IF NOT EXISTS idx_cook_events_cooked_at
-    ON recipe_cook_events(cooked_at DESC);
 
 PRAGMA user_version = 5;

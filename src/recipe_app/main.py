@@ -96,6 +96,7 @@ templates.env.filters["month_day"] = lambda d: d.strftime("%b %-d")
 templates.env.filters["isodate"] = lambda d: d.isoformat() if hasattr(d, "isoformat") else str(d)
 
 
+# Months/years use 30-day / 365-day approximations — fuzzy-friendly, not calendar-precise.
 def _relative_time(value) -> str:
     """Render an ISO timestamp (or datetime) as a friendly relative string.
 
@@ -117,6 +118,9 @@ def _relative_time(value) -> str:
     now = datetime.now(timezone.utc)
     delta = now - dt
     seconds = int(delta.total_seconds())
+    if seconds < 0:
+        # Future timestamp — render as absolute date instead of "just now"
+        return dt.strftime("%Y-%m-%d")
     if seconds < 60:
         return "just now"
     minutes = seconds // 60
@@ -800,21 +804,8 @@ async def record_cooked_submit(
     hx_request: Annotated[str | None, Header()] = None,
 ):
     db = get_db(request)
-    form = await request.form()
-    calendar_entry_id_raw = form.get("calendar_entry_id")
-    calendar_entry_id = (
-        int(calendar_entry_id_raw)
-        if calendar_entry_id_raw and str(calendar_entry_id_raw).isdigit()
-        else None
-    )
-    source = form.get("source") or ("calendar" if calendar_entry_id else "manual")
     try:
-        result = await record_recipe_cooked(
-            db,
-            recipe_id,
-            source=source,
-            calendar_entry_id=calendar_entry_id,
-        )
+        result = await record_recipe_cooked(db, recipe_id)
     except ValueError:
         if hx_request:
             return HTMLResponse("Recipe not found", status_code=404)

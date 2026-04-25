@@ -464,10 +464,6 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS idx_cook_events_recipe_time "
             "ON recipe_cook_events(recipe_id, cooked_at DESC)"
         )
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_cook_events_cooked_at "
-            "ON recipe_cook_events(cooked_at DESC)"
-        )
 
         cursor = await db.execute("PRAGMA foreign_key_check")
         violations = await cursor.fetchall()
@@ -739,6 +735,7 @@ async def list_recipes(
     sort: str = "recent",
 ) -> list[dict]:
     """List recipes with pagination and sorting.  Includes categories."""
+    # NOTE: sort keys mirrored in db.py (list_recipes + search_recipes order maps), models.SearchParams, routers/search.py, routers/recipes.py — keep in sync.
     order = {
         "name": "r.title ASC",
         "rating": "r.rating DESC NULLS LAST, r.created_at DESC",
@@ -816,6 +813,7 @@ async def search_recipes(
         from_clause = "recipes r"
         order_default = "r.created_at DESC"
 
+    # NOTE: sort keys mirrored in db.py (list_recipes + search_recipes order maps), models.SearchParams, routers/search.py, routers/recipes.py — keep in sync.
     order = {
         "name": "r.title ASC",
         "rating": "r.rating DESC NULLS LAST, r.created_at DESC",
@@ -1058,26 +1056,38 @@ async def record_recipe_cooked(
     """
     if source not in _VALID_COOK_SOURCES:
         raise ValueError(f"Invalid source: {source!r}")
+    if cooked_at is not None:
+        try:
+            cooked_at = datetime.fromisoformat(cooked_at).isoformat()
+        except ValueError:
+            raise ValueError(f"Invalid cooked_at: {cooked_at!r}") from None
     if notes:
         notes = sanitize_field(notes)
 
     async with _write_lock:
-        # Pre-check recipe inside the lock for consistent visibility
-        cursor = await db.execute("SELECT 1 FROM recipes WHERE id = ?", (recipe_id,))
-        if await cursor.fetchone() is None:
-            raise ValueError(f"Recipe {recipe_id} not found")
-
-        if calendar_entry_id is not None:
-            cursor = await db.execute(
-                "SELECT 1 FROM calendar_entries WHERE id = ?",
-                (calendar_entry_id,),
-            )
-            if await cursor.fetchone() is None:
-                calendar_entry_id = None
-                source = "manual"
-
         try:
             await db.execute("BEGIN IMMEDIATE")
+
+            # Pre-checks inside the write transaction so visibility is
+            # consistent with the INSERT below — closes the TOCTOU window
+            # where another connection (e.g. chef MCP) could delete the
+            # recipe between the check and the insert.
+            cursor = await db.execute(
+                "SELECT 1 FROM recipes WHERE id = ?", (recipe_id,)
+            )
+            if await cursor.fetchone() is None:
+                await db.rollback()
+                raise ValueError(f"Recipe {recipe_id} not found")
+
+            if calendar_entry_id is not None:
+                cursor = await db.execute(
+                    "SELECT 1 FROM calendar_entries WHERE id = ?",
+                    (calendar_entry_id,),
+                )
+                if await cursor.fetchone() is None:
+                    calendar_entry_id = None
+                    source = "manual"
+
             cursor = await db.execute(
                 """
                 INSERT INTO recipe_cook_events
@@ -1097,7 +1107,11 @@ async def record_recipe_cooked(
             await db.rollback()
             raise
 
-    recipe = await get_recipe(db, recipe_id)
+        # Re-fetch inside the write lock so the returned recipe reflects
+        # post-commit state (no concurrent writer can land between the
+        # commit above and this read).
+        recipe = await get_recipe(db, recipe_id)
+
     return {"event": event_row, "recipe": recipe}
 
 
