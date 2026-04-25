@@ -1,7 +1,7 @@
 ---
 title: "feat: Last-cooked history + freshness signals"
 type: feat
-status: active
+status: completed
 date: 2026-04-18
 last_updated: 2026-04-24
 ---
@@ -404,7 +404,7 @@ Leaving any surface out creates asymmetric capabilities — the exact pattern th
 - [x] `POST /api/recipes/{id}/cooked` records an event and returns both the event and the updated recipe.
 - [x] `GET /api/recipes/{id}/cook-events` returns events newest-first, `limit` respected.
 - [x] MCP `record_recipe_cooked`, `get_recipe_cook_history`, `delete_recipe_cook_event` behave identically to their REST counterparts.
-- [ ] Recipe detail page shows a freshness line ("Never cooked" | "Last cooked {relative}") and a `Mark Cooked` button.
+- [x] Recipe detail page shows a freshness line ("Never cooked" | "Last cooked {relative}") and a `Mark Cooked` button.
 - [x] `sort=last_cooked` is accepted by `/api/search` and orders recipes correctly with NULLs last.
 - [x] No pre-existing calendar entry is treated as a cook event anywhere in the codebase.
 
@@ -420,7 +420,7 @@ Leaving any surface out creates asymmetric capabilities — the exact pattern th
 - [x] All integration test scenarios from the System-Wide Impact section pass.
 - [x] `uv run pytest` passes with no new warnings.
 - [x] Test count increases by at least one per new endpoint and MCP tool.
-- [ ] Recipe detail page tested end-to-end via `tests/test_web_ui_forms.py` — click `Mark Cooked`, assert freshness line updates.
+- [x] Recipe detail page tested end-to-end via `tests/test_web_ui_forms.py` — click `Mark Cooked`, assert freshness line updates.
 
 ## Success metrics
 

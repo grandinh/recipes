@@ -743,6 +743,7 @@ async def list_recipes(
         "name": "r.title ASC",
         "rating": "r.rating DESC NULLS LAST, r.created_at DESC",
         "recent": "r.created_at DESC",
+        "last_cooked": "r.last_cooked_at IS NULL, r.last_cooked_at DESC",
     }.get(sort, "r.created_at DESC")
 
     cursor = await db.execute(

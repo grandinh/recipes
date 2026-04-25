@@ -41,12 +41,31 @@
         {% if recipe.difficulty %}
           <div class="recipe-detail-meta-item">{{ recipe.difficulty|capitalize }}</div>
         {% endif %}
+        {% block freshness_meta %}
+        <div class="recipe-detail-meta-item" id="freshness-meta">
+          {% if recipe.times_cooked and recipe.times_cooked > 0 %}
+            🍳 Last cooked {{ recipe.last_cooked_at|relative_time }}{% if recipe.times_cooked > 1 %} · {{ recipe.times_cooked }}×{% endif %}
+          {% else %}
+            🍳 Never cooked
+          {% endif %}
+        </div>
+        {% endblock %}
       </div>
     </div>
     <div class="recipe-detail-actions">
       <button type="button" class="btn btn-primary" id="cookingModeBtn" data-recipe-id="{{ recipe.id }}">
         Start Cooking
       </button>
+      <form method="post" action="/recipe/{{ recipe.id }}/cooked"
+            hx-post="/recipe/{{ recipe.id }}/cooked"
+            hx-target="#freshness-meta" hx-swap="outerHTML"
+            hx-disabled-elt="find button"
+            class="inline-form">
+        <button type="submit" class="btn btn-secondary"
+                title="Record that you cooked this recipe">
+          Mark Cooked
+        </button>
+      </form>
       {% if recipe.ingredients %}
       <form method="post" action="/grocery/add-from-recipe/{{ recipe.id }}" class="inline-form">
         <button type="submit" class="btn btn-secondary">Add to Grocery</button>
