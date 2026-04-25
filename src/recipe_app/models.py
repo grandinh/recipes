@@ -66,8 +66,32 @@ class RecipeResponse(BaseModel):
     categories: list[str] = Field(default_factory=list)
     base_servings: int | None = None
     photo_path: str | None = None
+    last_cooked_at: datetime | None = None
+    times_cooked: int = 0
     created_at: datetime
     updated_at: datetime
+
+
+class RecipeCookEventCreate(BaseModel):
+    cooked_at: datetime | None = None
+    source: Literal["manual", "calendar", "import", "migration"] = "manual"
+    calendar_entry_id: int | None = None
+    notes: str | None = None
+
+
+class RecipeCookEventResponse(BaseModel):
+    id: int
+    recipe_id: int
+    cooked_at: datetime
+    source: str
+    calendar_entry_id: int | None = None
+    notes: str | None = None
+    created_at: datetime
+
+
+class RecipeCookRecordedResponse(BaseModel):
+    event: RecipeCookEventResponse
+    recipe: RecipeResponse
 
 
 class SearchParams(BaseModel):
@@ -77,7 +101,8 @@ class SearchParams(BaseModel):
     rating_max: int | None = Field(None, ge=1, le=5)
     cuisine: str | None = None
     is_favorite: bool | None = None
-    sort: Literal["name", "rating", "recent"] = "recent"
+    # NOTE: sort keys mirrored in db.py (list_recipes + search_recipes order maps), models.SearchParams, routers/search.py, routers/recipes.py — keep in sync.
+    sort: Literal["name", "rating", "recent", "last_cooked"] = "recent"
     limit: int = Field(50, ge=1, le=200)
     offset: int = Field(0, ge=0)
 

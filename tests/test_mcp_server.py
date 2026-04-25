@@ -60,8 +60,11 @@ async def test_mcp_list_tools(mcp_client):
     tool_names = {t.name for t in tools}
     assert "search_recipes" in tool_names
     assert "create_recipe" in tool_names
+    assert "record_recipe_cooked" in tool_names
+    assert "get_recipe_cook_history" in tool_names
+    assert "delete_recipe_cook_event" in tool_names
     assert "find_recipes_from_pantry" in tool_names
-    assert len(tool_names) >= 24
+    assert len(tool_names) >= 27
 
 
 # ---------------------------------------------------------------------------

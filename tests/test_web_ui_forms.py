@@ -1,5 +1,9 @@
 """Tests for web UI form POST handlers — redirects, form parsing, error cases."""
 
+from datetime import datetime, timedelta, timezone
+
+from recipe_app.main import _relative_time
+
 
 # ---------------------------------------------------------------------------
 # Recipe form handlers
@@ -47,6 +51,102 @@ async def test_delete_recipe_form(client, create_recipe):
     )
     assert resp.status_code == 303
     assert resp.headers["location"] == "/"
+
+
+# ---------------------------------------------------------------------------
+# Mark Cooked form handler — freshness fragment + redirect fallback
+# ---------------------------------------------------------------------------
+
+
+async def test_recipe_detail_shows_never_cooked_initially(client, create_recipe):
+    recipe = await create_recipe(title="Never Cooked Display")
+    resp = await client.get(f"/recipe/{recipe['id']}")
+    assert resp.status_code == 200
+    assert "Never cooked" in resp.text
+    assert "Mark Cooked" in resp.text
+
+
+async def test_mark_cooked_form_redirects_without_htmx(client, create_recipe):
+    recipe = await create_recipe(title="Form Mark Cooked")
+    resp = await client.post(
+        f"/recipe/{recipe['id']}/cooked", follow_redirects=False
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == f"/recipe/{recipe['id']}"
+
+    detail = await client.get(f"/api/recipes/{recipe['id']}")
+    data = detail.json()
+    assert data["times_cooked"] == 1
+    assert data["last_cooked_at"] is not None
+
+
+async def test_mark_cooked_returns_freshness_fragment_for_htmx(
+    client, create_recipe
+):
+    recipe = await create_recipe(title="HTMX Mark Cooked")
+    resp = await client.post(
+        f"/recipe/{recipe['id']}/cooked",
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    assert 'id="freshness-meta"' in resp.text
+    assert "Last cooked" in resp.text
+    # Fragment-only — no full page chrome
+    assert "<html" not in resp.text.lower()
+
+
+async def test_mark_cooked_missing_recipe_returns_404_for_htmx(client):
+    resp = await client.post(
+        "/recipe/99999/cooked", headers={"HX-Request": "true"}
+    )
+    assert resp.status_code == 404
+
+
+async def test_mark_cooked_form_ignores_stray_form_fields(client, create_recipe):
+    """Form parsing was removed — stray fields like `source=evil` must NOT
+    cause validation errors or 404s. The handler ignores the body entirely."""
+    recipe = await create_recipe(title="Stray Fields Mark Cooked")
+    resp = await client.post(
+        f"/recipe/{recipe['id']}/cooked",
+        data={"source": "evil", "calendar_entry_id": "999"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == f"/recipe/{recipe['id']}"
+
+    detail = await client.get(f"/api/recipes/{recipe['id']}")
+    data = detail.json()
+    assert data["times_cooked"] == 1
+
+
+# ---------------------------------------------------------------------------
+# _relative_time filter — edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_relative_time_future_timestamp_returns_absolute_date():
+    """Future timestamps must NOT render as 'just now'. Render YYYY-MM-DD."""
+    future = datetime.now(timezone.utc) + timedelta(days=3)
+    out = _relative_time(future)
+    # Matches YYYY-MM-DD shape; equals strftime of the input
+    assert out == future.strftime("%Y-%m-%d")
+    assert out != "just now"
+
+
+async def test_recipe_list_sort_last_cooked_renders(client, create_recipe):
+    cooked = await create_recipe(title="Cooked Recipe")
+    await create_recipe(title="Uncooked Recipe")
+    await client.post(
+        f"/api/recipes/{cooked['id']}/cooked",
+        json={"cooked_at": "2026-04-20T12:00:00"},
+    )
+
+    resp = await client.get("/?sort=last_cooked")
+    assert resp.status_code == 200
+    body = resp.text
+    assert 'value="last_cooked"' in body
+    # Cooked recipe ranks before uncooked one in the rendered list
+    assert body.index("Cooked Recipe") < body.index("Uncooked Recipe")
 
 
 # ---------------------------------------------------------------------------

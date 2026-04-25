@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS recipes (
     is_favorite INTEGER NOT NULL DEFAULT 0 CHECK(is_favorite IN (0, 1)),
     base_servings INTEGER DEFAULT NULL,
     photo_path TEXT DEFAULT NULL,
+    last_cooked_at TEXT DEFAULT NULL,
+    times_cooked INTEGER NOT NULL DEFAULT 0 CHECK(times_cooked >= 0),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -110,6 +112,18 @@ AFTER UPDATE ON pantry_items FOR EACH ROW BEGIN
     UPDATE pantry_items SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
+-- v0.5: Cook history (planned ≠ actually cooked)
+CREATE TABLE IF NOT EXISTS recipe_cook_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+    cooked_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'manual'
+        CHECK(source IN ('manual', 'calendar', 'import', 'migration')),
+    calendar_entry_id INTEGER REFERENCES calendar_entries(id) ON DELETE SET NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_recipes_rating ON recipes(rating);
 CREATE INDEX IF NOT EXISTS idx_recipes_created ON recipes(created_at);
@@ -121,5 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_calendar_entries_recipe ON calendar_entries(recip
 CREATE INDEX IF NOT EXISTS idx_grocery_list_items_list ON grocery_list_items(grocery_list_id);
 CREATE INDEX IF NOT EXISTS idx_grocery_list_items_recipe ON grocery_list_items(grocery_list_id, recipe_id);
 CREATE INDEX IF NOT EXISTS idx_pantry_items_name ON pantry_items(name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_cook_events_recipe_time
+    ON recipe_cook_events(recipe_id, cooked_at DESC);
 
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;

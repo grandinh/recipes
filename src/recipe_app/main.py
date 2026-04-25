@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 from pathlib import Path
 from typing import Annotated
@@ -18,6 +18,7 @@ from recipe_app.db import (
     lifespan, get_db, list_recipes, get_recipe, create_recipe,
     update_recipe, delete_recipe, search_recipes, list_categories,
     toggle_favorite, set_rating,
+    record_recipe_cooked,
     add_calendar_entry, get_calendar_week, remove_calendar_entry,
     list_recipe_titles,
     get_grocery_list, generate_grocery_list,
@@ -93,6 +94,54 @@ templates.env.filters["weekday_short"] = lambda d: d.strftime("%a")
 templates.env.filters["day_num"] = lambda d: d.strftime("%-d")
 templates.env.filters["month_day"] = lambda d: d.strftime("%b %-d")
 templates.env.filters["isodate"] = lambda d: d.isoformat() if hasattr(d, "isoformat") else str(d)
+
+
+# Months/years use 30-day / 365-day approximations — fuzzy-friendly, not calendar-precise.
+def _relative_time(value) -> str:
+    """Render an ISO timestamp (or datetime) as a friendly relative string.
+
+    Anchored to UTC. Naive timestamps are assumed UTC (matches sqlite
+    `datetime('now')`). Returns "" for falsy input so templates can
+    short-circuit.
+    """
+    if not value:
+        return ""
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    else:
+        dt = value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    delta = now - dt
+    seconds = int(delta.total_seconds())
+    if seconds < 0:
+        # Future timestamp — render as absolute date instead of "just now"
+        return dt.strftime("%Y-%m-%d")
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    hours = minutes // 60
+    if hours < 24:
+        return "today"
+    days = delta.days
+    if days == 1:
+        return "yesterday"
+    if days < 30:
+        return f"{days} days ago"
+    if days < 365:
+        months = days // 30
+        return f"{months} month{'s' if months != 1 else ''} ago"
+    years = days // 365
+    return f"{years} year{'s' if years != 1 else ''} ago"
+
+
+templates.env.filters["relative_time"] = _relative_time
 
 
 # --- Health endpoint ---
@@ -744,6 +793,28 @@ async def toggle_favorite_submit(
         return templates.TemplateResponse(
             request, "recipe_detail.html", {"recipe": recipe},
             block_name="favorite_toggle",
+        )
+    return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+
+@app.post("/recipe/{recipe_id}/cooked")
+async def record_cooked_submit(
+    request: Request,
+    recipe_id: int,
+    hx_request: Annotated[str | None, Header()] = None,
+):
+    db = get_db(request)
+    try:
+        result = await record_recipe_cooked(db, recipe_id)
+    except ValueError:
+        if hx_request:
+            return HTMLResponse("Recipe not found", status_code=404)
+        return RedirectResponse("/", status_code=303)
+
+    if hx_request:
+        return templates.TemplateResponse(
+            request, "recipe_detail.html", {"recipe": result["recipe"]},
+            block_name="freshness_meta",
         )
     return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
 

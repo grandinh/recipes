@@ -31,7 +31,8 @@ async def search_recipes(
     """Search recipes by keyword, category, or rating.
 
     Query supports multi-ingredient search (e.g., "chicken garlic lemon").
-    Sort options: "name", "rating", "recent" (default).
+    Sort options: "name", "rating", "recent" (default), "last_cooked" (most
+    recently cooked first; never-cooked recipes ranked last).
     Filters can be combined: category + rating_min + cuisine etc.
     """
     db = await get_db()
@@ -55,6 +56,64 @@ async def get_recipe(recipe_id: int) -> dict | None:
     categories, image URL, and all metadata."""
     db = await get_db()
     return await db_module.get_recipe(db, recipe_id)
+
+
+@mcp.tool
+async def record_recipe_cooked(
+    recipe_id: int,
+    cooked_at: str | None = None,
+    source: str = "manual",
+    calendar_entry_id: int | None = None,
+    notes: str | None = None,
+) -> dict:
+    """Record that a recipe was cooked.
+
+    Args:
+        recipe_id: Target recipe.
+        cooked_at: Optional ISO 8601 timestamp. If omitted, uses current UTC.
+            Naive timestamps are stored verbatim and treated as UTC downstream.
+        source: One of 'manual' (default), 'calendar', 'import', 'migration'.
+        calendar_entry_id: Optional FK to calendar_entries. If the entry does
+            not exist, the link is dropped and source is downgraded to 'manual'.
+        notes: Optional free-text. HTML is stripped before storage.
+
+    Returns {"event": <event-row>, "recipe": <updated-recipe-dict>} on success
+    or {"error": "..."} on a validation/lookup failure."""
+    db = await get_db()
+    try:
+        return await db_module.record_recipe_cooked(
+            db,
+            recipe_id,
+            cooked_at=cooked_at,
+            source=source,
+            calendar_entry_id=calendar_entry_id,
+            notes=notes,
+        )
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool
+async def get_recipe_cook_history(recipe_id: int, limit: int = 10) -> list[dict] | dict:
+    """List cook events for a recipe, newest first. Returns up to `limit` events
+    (default 10) with shape {id, recipe_id, cooked_at, source, calendar_entry_id,
+    notes, created_at}. Returns {"error": "..."} if the recipe does not exist."""
+    db = await get_db()
+    recipe = await db_module.get_recipe(db, recipe_id)
+    if recipe is None:
+        return {"error": f"Recipe {recipe_id} not found"}
+    return await db_module.list_recipe_cook_events(db, recipe_id, limit=limit)
+
+
+@mcp.tool
+async def delete_recipe_cook_event(event_id: int) -> dict:
+    """Delete a cook event by ID. Returns {"deleted": True, "event_id": id}
+    on success or {"error": "..."} if the event does not exist."""
+    db = await get_db()
+    deleted = await db_module.delete_recipe_cook_event(db, event_id)
+    if deleted:
+        return {"deleted": True, "event_id": event_id}
+    return {"error": f"Cook event {event_id} not found"}
 
 
 @mcp.tool
